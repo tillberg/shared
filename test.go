@@ -6,12 +6,13 @@ import (
   "os"
   "log"
   "time"
+  "path"
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
 )
 
-var watch_target *string = flag.String("watch", ".", "The directory to keep an eye on")
+var watch_target *string = flag.String("watch", "_sync", "The directory to keep an eye on")
 
 type FileOp struct {
   filename string
@@ -83,8 +84,13 @@ func main() {
     go processChange(report_channel, update_channel)
   }
   go debounce(update_channel, debounce_channel)
+  watchpath := *watch_target
   watcher, _ := fsnotify.NewWatcher()
-  watcher.Watch(*watch_target)
+  watcher.Watch(watchpath)
+  var files, _ = ioutil.ReadDir(watchpath)
+  for _, file := range files {
+    update_channel <- path.Join(watchpath, file.Name())
+  }
   for {
     select {
       case event := <-watcher.Event:
