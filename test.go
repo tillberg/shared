@@ -22,8 +22,11 @@ type Blob struct {
   // non-empty for top-level files and trees:
   path string
 
+  // XXX ideally, this would be a B-Tree with distributed caching
+  children map[string]*Blob
+
   // non-empty for non-leaf files and trees:
-  segments []*Blob
+  // segments []*Blob
 
   // Channel to communicate with map of children
   childrenChannel chan string
@@ -42,13 +45,6 @@ type Commit struct {
   root     *Blob
   previous *Commit
 }
-
-// type Tree interface {
-
-//   NavigateTo(path string) Tree
-//   Remove(path string)
-//   Update(blob Blob)
-// }
 
 func (b Blob) FirstParent(f func(*Blob) bool) *Blob {
   for p := b.parent; p != nil; p = p.parent {
@@ -125,26 +121,49 @@ func WatchTree(watchPath string, updateChannel chan FileEvent, resultChannel cha
   }
 }
 
+func CloneTreeBlob(blob *Blob) *Blob {
+  children := map[string]*Blob{}
+  for k, v := range blob.children {
+    children[k] = v
+  }
+  return &Blob{
+    path: blob.path,
+    parent: blob.parent,
+    is_tree: blob.is_tree,
+    is_file: blob.is_file,
+    children: children,
+    childrenChannel: make(chan string, 10),
+  }
+}
+
 func (tree Blob) MonitorTree(input chan FileUpdate) {
-  // XXX ideally, this would be a B-Tree with distributed caching
-  var children = map[string]*Blob{}
+  // var children = map[string]*Blob{}
+  bubbleModifiedClone := func (f func(*Blob)) {
+    newTree := CloneTreeBlob(&tree)
+    f(newTree)
+    // send newTree to a to-be-added tree-channel for partial commits
+  }
   for {
     select {
       case fileUpdate := <- input:
         filename := path.Base(fileUpdate.blob.path)
         // childBlob := children[filename]
         if !fileUpdate.exists {
-          if children[filename] != nil {
+          if tree.children[filename] != nil {
             log.Printf("Removed %s", filename)
-            delete(children, filename)
+            bubbleModifiedClone(func(newTree *Blob) {
+              delete(newTree.children, filename)
+            })
           }
         } else {
-          if children[filename] == nil ||
-             children[filename].HashString() != fileUpdate.blob.HashString() {
+          if tree.children[filename] == nil ||
+             tree.children[filename].HashString() != fileUpdate.blob.HashString() {
             op := "Added"
-            if children[filename] != nil { op = "Updated" }
+            if tree.children[filename] != nil { op = "Updated" }
             log.Printf("%s %s %d %#x\n", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
-            children[filename] = fileUpdate.blob
+            bubbleModifiedClone(func(newTree *Blob) {
+              newTree.children[filename] = fileUpdate.blob
+            })
           }
         }
       // case lookup := <- tree.childrenChannel:
