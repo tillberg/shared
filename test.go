@@ -31,15 +31,16 @@ type Blob struct {
   // non-nil for everything except share roots:
   parent *Blob
 
-  // non-nil only on share roots (except for the "initial commit",
-  // which is also nil)
-  previous *Blob
-
   is_tree bool
   is_file bool
 
   // XXX for top level file: mode flags, timestamps?
   // XXX for top level tree: ?
+}
+
+type Commit struct {
+  root     *Blob
+  previous *Commit
 }
 
 // type Tree interface {
@@ -165,10 +166,8 @@ func MakeTreeBlob(path string, parent *Blob, updateChannel chan FileEvent) *Blob
   return &me
 }
 
-func MakeShareRootBlob(path string, previous *Blob, updateChannel chan FileEvent) *Blob {
-  me := MakeTreeBlob(path, nil, updateChannel)
-  me.previous = previous
-  return me
+func MakeCommit(path string, previous *Commit, updateChannel chan FileEvent) *Commit {
+  return &Commit{root: MakeTreeBlob(path, nil, updateChannel), previous: previous}
 }
 
 type FileUpdate struct {
@@ -267,7 +266,7 @@ func main() {
   }
   go debounce(processChannel, debounceChannel)
 
-  MakeShareRootBlob(*watch_target, nil, debounceChannel)
+  MakeCommit(*watch_target, nil, debounceChannel)
 
   select {}
 }
