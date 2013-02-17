@@ -83,6 +83,18 @@ func (blob Blob) Hash() []byte {
   return blob.hash
 }
 
+func MakeEmptyFileBlob(path string) *Blob {
+  return &Blob{path: path, is_tree: false, is_file: true}
+}
+
+func MakeFileBlob(path string, hash []byte) *Blob {
+  return &Blob{path: path, is_tree: false, is_file: true}
+}
+
+func MakeTreeBlob(path string) *Blob {
+  return &Blob{path: path, is_tree: true, is_file: false}
+}
+
 type FileUpdate struct {
   Blob
   exists bool
@@ -109,11 +121,11 @@ func processChange(output chan FileUpdate, path_channel chan string) {
   for path := range path_channel {
     statbuf, err := os.Stat(path)
     if err != nil {
-      output <- FileUpdate{Blob{nil, nil, path, nil, nil, nil, false, true}, false, 0}
+      output <- FileUpdate{*MakeEmptyFileBlob(path), false, 0}
     } else {
       bytes, err := ioutil.ReadFile(path)
       if err != nil { panic(err) }
-      output <- FileUpdate{Blob{bytes, nil, path, nil, nil, nil, false, true}, true, statbuf.Size()}
+      output <- FileUpdate{*MakeFileBlob(path, calculateHash(bytes)), true, statbuf.Size()}
     }
   }
 }
