@@ -25,9 +25,8 @@ type Blob struct {
   // non-empty for non-leaf files and trees:
   segments []*Blob
 
-  // lazily populated for tree roots:
-  // XXX ideally, this would be a B-Tree with distributed caching
-  children map[string]*Blob
+  // Channel to communicate with map of children
+  childrenChannel chan string
 
   // non-nil for everything except share roots:
   parent *Blob
@@ -88,6 +87,10 @@ func (blob Blob) Hash() []byte {
   return blob.hash
 }
 
+func (blob Blob) HashString() string {
+  return fmt.Sprintf("%#x", blob.Hash())
+}
+
 func (blob Blob) ShortHash() []byte {
   return blob.Hash()[:8]
 }
@@ -121,10 +124,43 @@ func WatchTree(watchPath string, updateChannel chan FileEvent, resultChannel cha
   }
 }
 
+func (tree Blob) MonitorTree(input chan FileUpdate) {
+  // XXX ideally, this would be a B-Tree with distributed caching
+  var children = map[string]*Blob{}
+  for {
+    select {
+      case fileUpdate := <- input:
+        filename := path.Base(fileUpdate.blob.path)
+        // childBlob := children[filename]
+        if !fileUpdate.exists {
+          if children[filename] != nil {
+            log.Printf("Removed %s", filename)
+            delete(children, filename)
+          }
+        } else {
+          if children[filename] == nil ||
+             children[filename].HashString() != fileUpdate.blob.HashString() {
+            op := "Added"
+            if children[filename] != nil { op = "Updated" }
+            log.Printf("%s %s %d %#x\n", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
+            children[filename] = fileUpdate.blob
+          }
+        }
+      // case lookup := <- tree.childrenChannel:
+    }
+  }
+}
+
 func MakeTreeBlob(path string, parent *Blob, updateChannel chan FileEvent) *Blob {
-  me := Blob{path: path, parent: parent, is_tree: true, is_file: false}
+  me := Blob{
+    path: path,
+    parent: parent,
+    is_tree: true,
+    is_file: false,
+    childrenChannel: make(chan string, 10),
+  }
   resultChannel := make(chan FileUpdate, 10)
-  go notificationReporter(resultChannel)
+  go me.MonitorTree(resultChannel)
   go WatchTree(me.path, updateChannel, resultChannel)
   return &me
 }
@@ -136,7 +172,7 @@ func MakeShareRootBlob(path string, previous *Blob, updateChannel chan FileEvent
 }
 
 type FileUpdate struct {
-  Blob
+  blob   *Blob
   exists bool
   size   int64
 }
@@ -152,12 +188,6 @@ func calculateHash(bytes []byte) []byte {
   return h.Sum([]byte{})
 }
 
-func notificationReporter(input chan FileUpdate) {
-  for op := range input {
-    log.Printf("%s %d %#x\n", op.path, op.size, op.ShortHash());
-  }
-}
-
 type FileEvent struct {
   path          string
   resultChannel chan FileUpdate
@@ -168,7 +198,7 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
     statbuf, err := os.Stat(event.path)
     if err != nil {
       // The file was deleted or otherwise doesn't exist
-      event.resultChannel <- FileUpdate{*MakeEmptyFileBlob(event.path), false, 0}
+      event.resultChannel <- FileUpdate{MakeEmptyFileBlob(event.path), false, 0}
     } else {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
@@ -184,12 +214,12 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
         if err != nil {
           os.MkdirAll(path.Join(cacheRoot, hashString[:2]), 0755)
           ioutil.WriteFile(cachePath, bytes, 0644)
-          log.Printf("Added %s to cache", hashString[:16])
+          log.Printf("Cached %s", hashString[:16])
         }
 
         // Send the update back to the tree's result channel
         event.resultChannel <- FileUpdate{
-          *MakeFileBlob(event.path, hash),
+          MakeFileBlob(event.path, hash),
           true,
           statbuf.Size(),
         }
@@ -239,7 +269,5 @@ func main() {
 
   MakeShareRootBlob(*watch_target, nil, debounceChannel)
 
-  for {
-    time.Sleep(time.Second)
-  }
+  select {}
 }
