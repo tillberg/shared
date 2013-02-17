@@ -102,11 +102,10 @@ func main() {
   for {
     select {
       case event := <-watcher.Event:
-        switch {
-          case event.IsCreate() || event.IsModify() || event.IsDelete() || event.IsRename():
-            debounce_channel <- event.Name
-          default:
-            log.Fatal("unknown event type", event)
+        if event.IsCreate() || event.IsModify() || event.IsDelete() || event.IsRename() {
+          debounce_channel <- event.Name
+        } else {
+          log.Fatal("unknown event type", event)
         }
       case error := <-watcher.Error:
         log.Fatal(error)
