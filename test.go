@@ -14,38 +14,49 @@ import (
 
 var watch_target *string = flag.String("watch", "_sync", "The directory to keep an eye on")
 
-type FileOp struct {
-  filename string
-  size int64
-  hash []byte
-  contents []byte
+type Blob struct {
+  bytes  []byte
+  hash   []byte
 }
 
-func notificationReporter(input chan FileOp) {
-  for op := range input {
-    fmt.Printf("%s %d %#x\n", op.filename, op.size, op.hash);
-  }
+type FileBlob struct {
+  Blob
+  path   string
+  // mode flags
+  // timestamps?
 }
 
-func getHash(bytes []byte) []byte {
+type FileBlobUpdate struct {
+  FileBlob
+  exists bool
+  size   int64
+}
+
+func (blob Blob) getHash() []byte {
   SHA256_SALT_BEFORE := []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
   SHA256_SALT_AFTER := []byte{')'}
   h := sha256.New()
   h.Write(SHA256_SALT_BEFORE)
-  h.Write(bytes)
+  h.Write(blob.bytes)
   h.Write(SHA256_SALT_AFTER)
   return h.Sum([]byte{})
 }
 
-func processChange(output chan FileOp, path chan string) {
-  for p := range path {
-    statbuf, err := os.Stat(p)
+func notificationReporter(input chan FileBlobUpdate) {
+  for op := range input {
+    fmt.Printf("%s %d %#x\n", op.path, op.size, op.getHash());
+  }
+}
+
+func processChange(output chan FileBlobUpdate, path_channel chan string) {
+  for path := range path_channel {
+    statbuf, err := os.Stat(path)
     if err != nil {
-      output <- FileOp{p, -1, nil, nil}
+      output <- FileBlobUpdate{FileBlob{Blob{nil, nil}, path}, false, 0}
     } else {
-      bytes, err := ioutil.ReadFile(p)
+      bytes, err := ioutil.ReadFile(path)
       if err != nil { panic(err) }
-      output <- FileOp{p, statbuf.Size(), getHash(bytes), bytes}
+      output <- FileBlobUpdate{FileBlob{Blob{bytes, nil}, path}, true, statbuf.Size()}
     }
   }
 }
@@ -83,7 +94,7 @@ func main() {
   flag.Parse()
   fmt.Println("Started.")
   go restartOnChange()
-  var report_channel = make(chan FileOp, 100)
+  var report_channel = make(chan FileBlobUpdate, 100)
   var update_channel = make(chan string, 100)
   var debounce_channel = make(chan string, 100)
   go notificationReporter(report_channel)
