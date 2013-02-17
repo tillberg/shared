@@ -12,7 +12,8 @@ import (
   "github.com/howeyc/fsnotify"
 )
 
-var watch_target *string = flag.String("watch", "_sync", "The directory to keep an eye on")
+var watch_target *string = flag.String("watch", "_sync", "The directory to sync")
+var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
 
 type Blob struct {
   bytes  []byte
@@ -28,8 +29,12 @@ type Blob struct {
   // XXX ideally, this would be a B-Tree with distributed caching
   children map[string]*Blob
 
-  // non-nil for everything except root trees:
+  // non-nil for everything except share roots:
   parent *Blob
+
+  // non-nil only on share roots (except for the "initial commit",
+  // which is also nil)
+  previous *Blob
 
   is_tree bool
   is_file bool
@@ -88,7 +93,7 @@ func MakeEmptyFileBlob(path string) *Blob {
 }
 
 func MakeFileBlob(path string, hash []byte) *Blob {
-  return &Blob{path: path, is_tree: false, is_file: true}
+  return &Blob{path: path, hash: hash, is_tree: false, is_file: true}
 }
 
 func WatchTree(watchPath string, updateChannel chan FileEvent, resultChannel chan FileUpdate) {
@@ -120,8 +125,10 @@ func MakeTreeBlob(path string, parent *Blob, updateChannel chan FileEvent) *Blob
   return &me
 }
 
-func MakeShareRootBlob(path string, updateChannel chan FileEvent) *Blob {
-  return MakeTreeBlob(path, nil, updateChannel)
+func MakeShareRootBlob(path string, previous *Blob, updateChannel chan FileEvent) *Blob {
+  me := MakeTreeBlob(path, nil, updateChannel)
+  me.previous = previous
+  return me
 }
 
 type FileUpdate struct {
@@ -147,19 +154,40 @@ func notificationReporter(input chan FileUpdate) {
 }
 
 type FileEvent struct {
-  path           string
+  path          string
   resultChannel chan FileUpdate
 }
 
-func processChange(inputChannel chan FileEvent) {
+func processChange(cacheRoot string, inputChannel chan FileEvent) {
   for event := range inputChannel {
     statbuf, err := os.Stat(event.path)
     if err != nil {
       event.resultChannel <- FileUpdate{*MakeEmptyFileBlob(event.path), false, 0}
     } else {
+      // Read the entire file and calculate its hash
+      // XXX alternate path for large files?
       bytes, err := ioutil.ReadFile(event.path)
-      if err != nil { panic(err) }
-      event.resultChannel <- FileUpdate{*MakeFileBlob(event.path, calculateHash(bytes)), true, statbuf.Size()}
+      if err != nil {
+
+        log.Printf("Error reading `%s`: %s", event.path, err);
+      } else {
+        hash := calculateHash(bytes)
+
+        // Save a copy in the cache if we don't already have one
+        hashString := fmt.Sprintf("%#x", hash)
+        cachePath := path.Join(cacheRoot, hashString)
+        _, err := os.Stat(cachePath)
+        if err != nil {
+          ioutil.WriteFile(cachePath, bytes, 0644)
+        }
+
+        // Send the update back to the tree's result channel
+        event.resultChannel <- FileUpdate{
+          *MakeFileBlob(event.path, hash),
+          true,
+          statbuf.Size(),
+        }
+      }
     }
   }
 }
@@ -195,15 +223,16 @@ func main() {
   flag.Parse()
   fmt.Println("Started.")
   go restartOnChange()
+  os.Mkdir(*cache_root, 0755)
   var processChannel = make(chan FileEvent, 100)
   var debounceChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
   for i := 0; i < WORKER_COUNT; i++ {
-    go processChange(processChannel)
+    go processChange(*cache_root, processChannel)
   }
   go debounce(processChannel, debounceChannel)
 
-  MakeShareRootBlob(*watch_target, debounceChannel)
+  MakeShareRootBlob(*watch_target, nil, debounceChannel)
 
   for {
     time.Sleep(time.Second)
