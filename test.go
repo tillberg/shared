@@ -107,10 +107,8 @@ func debounce(output chan string, input chan string) {
 func restartOnChange() {
   watcher, _ := fsnotify.NewWatcher()
   watcher.Watch("test.go")
-  select {
-    case <- watcher.Event:
-      os.Exit(0)
-  }
+  <-watcher.Event
+  os.Exit(0)
 }
 
 func main() {
