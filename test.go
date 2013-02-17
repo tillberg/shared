@@ -27,6 +27,16 @@ func notificationReporter(input chan FileOp) {
   }
 }
 
+func getHash(bytes []byte) []byte {
+  SHA256_SALT_BEFORE := []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
+  SHA256_SALT_AFTER := []byte{')'}
+  h := sha256.New()
+  h.Write(SHA256_SALT_BEFORE)
+  h.Write(bytes)
+  h.Write(SHA256_SALT_AFTER)
+  return h.Sum([]byte{})
+}
+
 func processChange(output chan FileOp, path chan string) {
   for p := range path {
     statbuf, err := os.Stat(p)
@@ -35,9 +45,7 @@ func processChange(output chan FileOp, path chan string) {
     } else {
       bytes, err := ioutil.ReadFile(p)
       if err != nil { panic(err) }
-      h := sha256.New()
-      h.Write(bytes)
-      output <- FileOp{p, statbuf.Size(), h.Sum([]byte{}), bytes}
+      output <- FileOp{p, statbuf.Size(), getHash(bytes), bytes}
     }
   }
 }
