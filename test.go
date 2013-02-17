@@ -91,8 +91,37 @@ func MakeFileBlob(path string, hash []byte) *Blob {
   return &Blob{path: path, is_tree: false, is_file: true}
 }
 
-func MakeTreeBlob(path string) *Blob {
-  return &Blob{path: path, is_tree: true, is_file: false}
+func WatchTree(watchPath string, updateChannel chan FileEvent, resultChannel chan FileUpdate) {
+  watcher, _ := fsnotify.NewWatcher()
+  watcher.Watch(watchPath)
+  var files, _ = ioutil.ReadDir(watchPath)
+  for _, file := range files {
+    updateChannel <- FileEvent{path.Join(watchPath, file.Name()), resultChannel}
+  }
+  for {
+    select {
+      case event := <-watcher.Event:
+        if event.IsCreate() || event.IsModify() || event.IsDelete() || event.IsRename() {
+          updateChannel <- FileEvent{event.Name, resultChannel}
+        } else {
+          log.Fatal("unknown event type", event)
+        }
+      case error := <-watcher.Error:
+        log.Fatal(error)
+    }
+  }
+}
+
+func MakeTreeBlob(path string, parent *Blob, updateChannel chan FileEvent) *Blob {
+  me := Blob{path: path, parent: parent, is_tree: true, is_file: false}
+  resultChannel := make(chan FileUpdate, 10)
+  go notificationReporter(resultChannel)
+  go WatchTree(me.path, updateChannel, resultChannel)
+  return &me
+}
+
+func MakeShareRootBlob(path string, updateChannel chan FileEvent) *Blob {
+  return MakeTreeBlob(path, nil, updateChannel)
 }
 
 type FileUpdate struct {
@@ -117,34 +146,39 @@ func notificationReporter(input chan FileUpdate) {
   }
 }
 
-func processChange(output chan FileUpdate, path_channel chan string) {
-  for path := range path_channel {
-    statbuf, err := os.Stat(path)
+type FileEvent struct {
+  path           string
+  resultChannel chan FileUpdate
+}
+
+func processChange(inputChannel chan FileEvent) {
+  for event := range inputChannel {
+    statbuf, err := os.Stat(event.path)
     if err != nil {
-      output <- FileUpdate{*MakeEmptyFileBlob(path), false, 0}
+      event.resultChannel <- FileUpdate{*MakeEmptyFileBlob(event.path), false, 0}
     } else {
-      bytes, err := ioutil.ReadFile(path)
+      bytes, err := ioutil.ReadFile(event.path)
       if err != nil { panic(err) }
-      output <- FileUpdate{*MakeFileBlob(path, calculateHash(bytes)), true, statbuf.Size()}
+      event.resultChannel <- FileUpdate{*MakeFileBlob(event.path, calculateHash(bytes)), true, statbuf.Size()}
     }
   }
 }
 
-func debounce(output chan string, input chan string) {
+func debounce(output chan FileEvent, input chan FileEvent) {
   var waiting = map[string] bool {}
-  var timeout_channel = make(chan string, 100)
+  var timeout_channel = make(chan FileEvent, 100)
   for {
     select {
       case in := <-input:
-        if !waiting[in] {
-          waiting[in] = true
-          go func(_in string) {
+        if !waiting[in.path] {
+          waiting[in.path] = true
+          go func(_in FileEvent) {
               time.Sleep(100 * time.Millisecond)
               timeout_channel <- _in
           }(in)
         }
       case ready := <-timeout_channel:
-        waiting[ready] = false
+        waiting[ready.path] = false
         output <- ready
     }
   }
@@ -161,32 +195,17 @@ func main() {
   flag.Parse()
   fmt.Println("Started.")
   go restartOnChange()
-  var report_channel = make(chan FileUpdate, 100)
-  var update_channel = make(chan string, 100)
-  var debounce_channel = make(chan string, 100)
-  go notificationReporter(report_channel)
+  var processChannel = make(chan FileEvent, 100)
+  var debounceChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
   for i := 0; i < WORKER_COUNT; i++ {
-    go processChange(report_channel, update_channel)
+    go processChange(processChannel)
   }
-  go debounce(update_channel, debounce_channel)
-  watchpath := *watch_target
-  watcher, _ := fsnotify.NewWatcher()
-  watcher.Watch(watchpath)
-  var files, _ = ioutil.ReadDir(watchpath)
-  for _, file := range files {
-    update_channel <- path.Join(watchpath, file.Name())
-  }
+  go debounce(processChannel, debounceChannel)
+
+  MakeShareRootBlob(*watch_target, debounceChannel)
+
   for {
-    select {
-      case event := <-watcher.Event:
-        if event.IsCreate() || event.IsModify() || event.IsDelete() || event.IsRename() {
-          debounce_channel <- event.Name
-        } else {
-          log.Fatal("unknown event type", event)
-        }
-      case error := <-watcher.Error:
-        log.Fatal(error)
-    }
+    time.Sleep(time.Second)
   }
 }
