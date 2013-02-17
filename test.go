@@ -22,8 +22,21 @@ type Blob struct {
 type FileBlob struct {
   Blob
   path   string
+  parent *TreeBlob
   // mode flags
   // timestamps?
+}
+
+type TreeBlob struct {
+  Blob
+  path string
+  children map[string]*PathedBlob
+  // other properties?
+}
+
+type PathedBlob interface {
+  IsFile() bool
+  Hash()   []byte
 }
 
 type FileBlobUpdate struct {
@@ -32,19 +45,29 @@ type FileBlobUpdate struct {
   size   int64
 }
 
-func (blob Blob) getHash() []byte {
+func (blob Blob) Hash() []byte {
+  if blob.hash == nil {
+    blob.hash = calculateHash(blob.bytes)
+  }
+  return blob.hash
+}
+
+func (b FileBlob) IsFile() bool { return true }
+func (b TreeBlob) IsFile() bool { return false }
+
+func calculateHash(bytes []byte) []byte {
   SHA256_SALT_BEFORE := []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
   SHA256_SALT_AFTER := []byte{')'}
   h := sha256.New()
   h.Write(SHA256_SALT_BEFORE)
-  h.Write(blob.bytes)
+  h.Write(bytes)
   h.Write(SHA256_SALT_AFTER)
   return h.Sum([]byte{})
 }
 
 func notificationReporter(input chan FileBlobUpdate) {
   for op := range input {
-    fmt.Printf("%s %d %#x\n", op.path, op.size, op.getHash());
+    fmt.Printf("%s %d %#x\n", op.path, op.size, op.Hash());
   }
 }
 
@@ -52,11 +75,11 @@ func processChange(output chan FileBlobUpdate, path_channel chan string) {
   for path := range path_channel {
     statbuf, err := os.Stat(path)
     if err != nil {
-      output <- FileBlobUpdate{FileBlob{Blob{nil, nil}, path}, false, 0}
+      output <- FileBlobUpdate{FileBlob{Blob{nil, nil}, path, nil}, false, 0}
     } else {
       bytes, err := ioutil.ReadFile(path)
       if err != nil { panic(err) }
-      output <- FileBlobUpdate{FileBlob{Blob{bytes, nil}, path}, true, statbuf.Size()}
+      output <- FileBlobUpdate{FileBlob{Blob{bytes, nil}, path, nil}, true, statbuf.Size()}
     }
   }
 }
