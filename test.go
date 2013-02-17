@@ -88,6 +88,10 @@ func (blob Blob) Hash() []byte {
   return blob.hash
 }
 
+func (blob Blob) ShortHash() []byte {
+  return blob.Hash()[:8]
+}
+
 func MakeEmptyFileBlob(path string) *Blob {
   return &Blob{path: path, is_tree: false, is_file: true}
 }
@@ -137,9 +141,10 @@ type FileUpdate struct {
   size   int64
 }
 
+var SHA256_SALT_BEFORE = []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
+var SHA256_SALT_AFTER = []byte{')'}
+
 func calculateHash(bytes []byte) []byte {
-  SHA256_SALT_BEFORE := []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
-  SHA256_SALT_AFTER := []byte{')'}
   h := sha256.New()
   h.Write(SHA256_SALT_BEFORE)
   h.Write(bytes)
@@ -149,7 +154,7 @@ func calculateHash(bytes []byte) []byte {
 
 func notificationReporter(input chan FileUpdate) {
   for op := range input {
-    fmt.Printf("%s %d %#x\n", op.path, op.size, op.Hash());
+    log.Printf("%s %d %#x\n", op.path, op.size, op.ShortHash());
   }
 }
 
@@ -162,23 +167,24 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
   for event := range inputChannel {
     statbuf, err := os.Stat(event.path)
     if err != nil {
+      // The file was deleted or otherwise doesn't exist
       event.resultChannel <- FileUpdate{*MakeEmptyFileBlob(event.path), false, 0}
     } else {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
       bytes, err := ioutil.ReadFile(event.path)
       if err != nil {
-
         log.Printf("Error reading `%s`: %s", event.path, err);
       } else {
-        hash := calculateHash(bytes)
-
         // Save a copy in the cache if we don't already have one
+        hash := calculateHash(bytes)
         hashString := fmt.Sprintf("%#x", hash)
-        cachePath := path.Join(cacheRoot, hashString)
+        cachePath := path.Join(cacheRoot, hashString[:2], hashString[2:])
         _, err := os.Stat(cachePath)
         if err != nil {
+          os.MkdirAll(path.Join(cacheRoot, hashString[:2]), 0755)
           ioutil.WriteFile(cachePath, bytes, 0644)
+          log.Printf("Added %s to cache", hashString[:16])
         }
 
         // Send the update back to the tree's result channel
@@ -221,9 +227,8 @@ func restartOnChange() {
 
 func main() {
   flag.Parse()
-  fmt.Println("Started.")
+  log.Println("Started.")
   go restartOnChange()
-  os.Mkdir(*cache_root, 0755)
   var processChannel = make(chan FileEvent, 100)
   var debounceChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
