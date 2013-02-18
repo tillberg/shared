@@ -76,6 +76,14 @@ func (b Blob) IsTreeSegment() bool { return b.Root().IsTree() }
 func (b Blob) IsFile()        bool { return b.is_file }
 func (b Blob) IsFileSegment() bool { return b.Root().IsFile() }
 
+func calculateHash(bytes []byte) []byte {
+  h := sha256.New()
+  h.Write(SHA256_SALT_BEFORE)
+  h.Write(bytes)
+  h.Write(SHA256_SALT_AFTER)
+  return h.Sum([]byte{})
+}
+
 func (blob Blob) Hash() []byte {
   if blob.hash == nil {
     blob.hash = calculateHash(blob.bytes)
@@ -95,12 +103,28 @@ func (blob Blob) ShortHashString() string {
   return fmt.Sprintf("%#x", blob.ShortHash())
 }
 
+func (blob Blob) EnsureCached() {
+  // Save a copy in the cache if we don't already have one
+  hashString := blob.HashString()
+  cachePath := path.Join(*cache_root, hashString[:2], hashString[2:])
+  _, err := os.Stat(cachePath)
+  if err != nil {
+    os.MkdirAll(path.Join(*cache_root, hashString[:2]), 0755)
+    ioutil.WriteFile(cachePath, blob.bytes, 0644)
+    log.Printf("Cached %s", hashString[:16])
+  }
+}
+
 func MakeEmptyFileBlob() *Blob {
   return &Blob{is_tree: false, is_file: true}
 }
 
-func MakeFileBlob(hash []byte) *Blob {
+func MakeFileBlobFromHash(hash []byte) *Blob {
   return &Blob{hash: hash, is_tree: false, is_file: true}
+}
+
+func MakeFileBlobFromBytes(bytes []byte) *Blob {
+  return &Blob{bytes: bytes, is_tree: false, is_file: true}
 }
 
 func WatchTree(watchPath string, resultChannel chan FileUpdate) {
@@ -130,6 +154,7 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
   updateSelf := func() {
     tree.bytes = []byte(fmt.Sprint(children))
     tree.hash = nil
+    tree.EnsureCached()
     tree.revisionChannel <- &tree
   }
   for {
@@ -204,20 +229,12 @@ type FileUpdate struct {
 var SHA256_SALT_BEFORE = []byte{'s', 'h', 'a', 'r', 'e', 'd', '('}
 var SHA256_SALT_AFTER = []byte{')'}
 
-func calculateHash(bytes []byte) []byte {
-  h := sha256.New()
-  h.Write(SHA256_SALT_BEFORE)
-  h.Write(bytes)
-  h.Write(SHA256_SALT_AFTER)
-  return h.Sum([]byte{})
-}
-
 type FileEvent struct {
   path          string
   resultChannel chan FileUpdate
 }
 
-func processChange(cacheRoot string, inputChannel chan FileEvent) {
+func processChange(inputChannel chan FileEvent) {
   for event := range inputChannel {
     statbuf, err := os.Stat(event.path)
     if err != nil {
@@ -230,20 +247,11 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
       if err != nil {
         log.Printf("Error reading `%s`: %s", event.path, err);
       } else {
-        // Save a copy in the cache if we don't already have one
-        hash := calculateHash(bytes)
-        hashString := fmt.Sprintf("%#x", hash)
-        cachePath := path.Join(cacheRoot, hashString[:2], hashString[2:])
-        _, err := os.Stat(cachePath)
-        if err != nil {
-          os.MkdirAll(path.Join(cacheRoot, hashString[:2]), 0755)
-          ioutil.WriteFile(cachePath, bytes, 0644)
-          log.Printf("Cached %s", hashString[:16])
-        }
-
+        blob := MakeFileBlobFromBytes(bytes)
+        blob.EnsureCached()
         // Send the update back to the tree's result channel
         event.resultChannel <- FileUpdate{
-          MakeFileBlob(hash),
+          blob,
           event.path,
           true,
           statbuf.Size(),
@@ -287,7 +295,7 @@ func main() {
   var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
   for i := 0; i < WORKER_COUNT; i++ {
-    go processChange(*cache_root, processImmChannel)
+    go processChange(processImmChannel)
   }
   go debounce(processImmChannel, processChannel)
 
