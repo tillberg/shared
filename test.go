@@ -21,12 +21,6 @@ type Blob struct {
   bytes  []byte
   hash   []byte
 
-  // non-empty for top-level files and trees:
-  // path string
-
-  // XXX ideally, this would be a B-Tree with distributed caching
-  children map[string]*Blob
-
   // non-empty for non-leaf files and trees:
   // segments []*Blob
 
@@ -130,25 +124,12 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   }
 }
 
-func CloneTreeBlob(blob *Blob) *Blob {
-  children := map[string]*Blob{}
-  for k, v := range blob.children {
-    children[k] = v
-  }
-  return &Blob{
-    parent: blob.parent,
-    is_tree: blob.is_tree,
-    is_file: blob.is_file,
-    children: children,
-    revisionChannel: blob.revisionChannel,
-    childrenChannel: make(chan string, 10),
-  }
-}
-
 func (tree Blob) MonitorTree(input chan FileUpdate) {
-  // var children = map[string]*Blob{}
+  // XXX ideally, this would be a B-Tree with distributed caching
+  var children = map[string]*Blob{}
   updateSelf := func() {
-    tree.bytes = []byte(fmt.Sprint(tree.children))
+    tree.bytes = []byte(fmt.Sprint(children))
+    tree.hash = nil
     tree.revisionChannel <- &tree
   }
   for {
@@ -156,18 +137,18 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
       case fileUpdate := <- input:
         filename := path.Base(fileUpdate.path)
         if !fileUpdate.exists {
-          if tree.children[filename] != nil {
+          if children[filename] != nil {
             log.Printf("Removed %s", filename)
-            delete(tree.children, filename)
+            delete(children, filename)
             updateSelf()
           }
         } else {
-          if tree.children[filename] == nil ||
-             tree.children[filename].HashString() != fileUpdate.blob.HashString() {
+          if children[filename] == nil ||
+             children[filename].HashString() != fileUpdate.blob.HashString() {
             op := "Added"
-            if tree.children[filename] != nil { op = "Updated" }
+            if children[filename] != nil { op = "Updated" }
             log.Printf("%s %s %d %#x\n", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
-            tree.children[filename] = fileUpdate.blob
+            children[filename] = fileUpdate.blob
             updateSelf()
           }
         }
@@ -183,7 +164,6 @@ func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob) *Blob {
     is_file: false,
     childrenChannel: make(chan string, 10),
     revisionChannel: revisionChannel,
-    children: make(map[string]*Blob),
   }
   resultChannel := make(chan FileUpdate, 10)
   go me.MonitorTree(resultChannel)
