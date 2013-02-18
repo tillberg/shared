@@ -10,6 +10,8 @@ import (
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
+  "code.google.com/p/goprotobuf/proto"
+  "./sharedpb"
 )
 
 var watch_target *string = flag.String("watch", "_sync", "The directory to sync")
@@ -152,7 +154,9 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
   // XXX ideally, this would be a B-Tree with distributed caching
   var children = map[string]*Blob{}
   updateSelf := func() {
-    tree.bytes = []byte(fmt.Sprint(children))
+    pbtree := sharedpb.Tree{}
+
+    tree.bytes, _ = proto.Marshal(&pbtree)
     tree.hash = nil
     tree.EnsureCached()
     tree.revisionChannel <- &tree
