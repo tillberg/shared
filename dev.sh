@@ -1,5 +1,5 @@
 while :
 do
-    go run test.go
+    go run shared.go
     sleep 0.5
 done

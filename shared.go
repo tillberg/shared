@@ -275,7 +275,7 @@ func debounce(output chan FileEvent, input chan FileEvent) {
 
 func restartOnChange() {
   watcher, _ := fsnotify.NewWatcher()
-  watcher.Watch("test.go")
+  watcher.Watch("shared.go")
   <-watcher.Event
   os.Exit(0)
 }
