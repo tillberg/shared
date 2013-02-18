@@ -22,7 +22,7 @@ type Blob struct {
   hash   []byte
 
   // non-empty for top-level files and trees:
-  path string
+  // path string
 
   // XXX ideally, this would be a B-Tree with distributed caching
   children map[string]*Blob
@@ -101,12 +101,12 @@ func (blob Blob) ShortHashString() string {
   return fmt.Sprintf("%#x", blob.ShortHash())
 }
 
-func MakeEmptyFileBlob(path string) *Blob {
-  return &Blob{path: path, is_tree: false, is_file: true}
+func MakeEmptyFileBlob() *Blob {
+  return &Blob{is_tree: false, is_file: true}
 }
 
-func MakeFileBlob(path string, hash []byte) *Blob {
-  return &Blob{path: path, hash: hash, is_tree: false, is_file: true}
+func MakeFileBlob(hash []byte) *Blob {
+  return &Blob{hash: hash, is_tree: false, is_file: true}
 }
 
 func WatchTree(watchPath string, resultChannel chan FileUpdate) {
@@ -136,7 +136,6 @@ func CloneTreeBlob(blob *Blob) *Blob {
     children[k] = v
   }
   return &Blob{
-    path: blob.path,
     parent: blob.parent,
     is_tree: blob.is_tree,
     is_file: blob.is_file,
@@ -148,22 +147,19 @@ func CloneTreeBlob(blob *Blob) *Blob {
 
 func (tree Blob) MonitorTree(input chan FileUpdate) {
   // var children = map[string]*Blob{}
-  bubbleModifiedClone := func (f func(*Blob)) {
-    newTree := CloneTreeBlob(&tree)
-    f(newTree)
-    tree.revisionChannel <- newTree
+  updateSelf := func() {
+    tree.bytes = []byte(fmt.Sprint(tree.children))
+    tree.revisionChannel <- &tree
   }
   for {
     select {
       case fileUpdate := <- input:
-        filename := path.Base(fileUpdate.blob.path)
-        // childBlob := children[filename]
+        filename := path.Base(fileUpdate.path)
         if !fileUpdate.exists {
           if tree.children[filename] != nil {
             log.Printf("Removed %s", filename)
-            bubbleModifiedClone(func(newTree *Blob) {
-              delete(newTree.children, filename)
-            })
+            delete(tree.children, filename)
+            updateSelf()
           }
         } else {
           if tree.children[filename] == nil ||
@@ -171,9 +167,8 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
             op := "Added"
             if tree.children[filename] != nil { op = "Updated" }
             log.Printf("%s %s %d %#x\n", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
-            bubbleModifiedClone(func(newTree *Blob) {
-              newTree.children[filename] = fileUpdate.blob
-            })
+            tree.children[filename] = fileUpdate.blob
+            updateSelf()
           }
         }
       // case lookup := <- tree.childrenChannel:
@@ -183,16 +178,16 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
 
 func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob) *Blob {
   me := Blob{
-    path: path,
     parent: parent,
     is_tree: true,
     is_file: false,
     childrenChannel: make(chan string, 10),
     revisionChannel: revisionChannel,
+    children: make(map[string]*Blob),
   }
   resultChannel := make(chan FileUpdate, 10)
   go me.MonitorTree(resultChannel)
-  go WatchTree(me.path, resultChannel)
+  go WatchTree(path, resultChannel)
   return &me
 }
 
@@ -200,8 +195,8 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
   for {
     select {
       case newTree := <-revisionChannel:
-        commit.root = newTree
         log.Printf("New branch revision: %s", newTree.ShortHashString())
+        commit.root = newTree
     }
   }
 }
@@ -221,6 +216,7 @@ func MakeBranch(path string, previous *Commit, root *Blob) *Commit {
 
 type FileUpdate struct {
   blob   *Blob
+  path   string
   exists bool
   size   int64
 }
@@ -246,7 +242,7 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
     statbuf, err := os.Stat(event.path)
     if err != nil {
       // The file was deleted or otherwise doesn't exist
-      event.resultChannel <- FileUpdate{MakeEmptyFileBlob(event.path), false, 0}
+      event.resultChannel <- FileUpdate{MakeEmptyFileBlob(), event.path, false, 0}
     } else {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
@@ -267,7 +263,8 @@ func processChange(cacheRoot string, inputChannel chan FileEvent) {
 
         // Send the update back to the tree's result channel
         event.resultChannel <- FileUpdate{
-          MakeFileBlob(event.path, hash),
+          MakeFileBlob(hash),
+          event.path,
           true,
           statbuf.Size(),
         }
