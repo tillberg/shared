@@ -47,7 +47,7 @@ type Commit struct {
   previous *Commit
 }
 
-func (b Blob) FirstParent(f func(*Blob) bool) *Blob {
+func (b *Blob) FirstParent(f func(*Blob) bool) *Blob {
   for p := b.parent; p != nil; p = p.parent {
     if f(p) {
       return p
@@ -56,13 +56,13 @@ func (b Blob) FirstParent(f func(*Blob) bool) *Blob {
   return nil
 }
 
-func (b Blob) ShareRoot() *Blob {
+func (b *Blob) ShareRoot() *Blob {
   return b.FirstParent(func(b *Blob) bool {
     return b.IsShareRoot()
   })
 }
 
-func (b Blob) Root() *Blob {
+func (b *Blob) Root() *Blob {
   root := b.FirstParent(func(b *Blob) bool {
     return b.IsFile() || b.IsTree()
   })
@@ -72,11 +72,11 @@ func (b Blob) Root() *Blob {
   return root
 }
 
-func (b Blob) IsShareRoot()   bool { return b.parent == nil }
-func (b Blob) IsTree()        bool { return b.is_tree }
-func (b Blob) IsTreeSegment() bool { return b.Root().IsTree() }
-func (b Blob) IsFile()        bool { return b.is_file }
-func (b Blob) IsFileSegment() bool { return b.Root().IsFile() }
+func (b *Blob) IsShareRoot()   bool { return b.parent == nil }
+func (b *Blob) IsTree()        bool { return b.is_tree }
+func (b *Blob) IsTreeSegment() bool { return b.Root().IsTree() }
+func (b *Blob) IsFile()        bool { return b.is_file }
+func (b *Blob) IsFileSegment() bool { return b.Root().IsFile() }
 
 func calculateHash(bytes []byte) []byte {
   h := sha256.New()
@@ -86,26 +86,26 @@ func calculateHash(bytes []byte) []byte {
   return h.Sum([]byte{})
 }
 
-func (blob Blob) Hash() []byte {
+func (blob *Blob) Hash() []byte {
   if blob.hash == nil {
     blob.hash = calculateHash(blob.bytes)
   }
   return blob.hash
 }
 
-func (blob Blob) HashString() string {
+func (blob *Blob) HashString() string {
   return fmt.Sprintf("%#x", blob.Hash())
 }
 
-func (blob Blob) ShortHash() []byte {
+func (blob *Blob) ShortHash() []byte {
   return blob.Hash()[:8]
 }
 
-func (blob Blob) ShortHashString() string {
+func (blob *Blob) ShortHashString() string {
   return fmt.Sprintf("%#x", blob.ShortHash())
 }
 
-func (blob Blob) EnsureCached() {
+func (blob *Blob) EnsureCached() {
   // Save a copy in the cache if we don't already have one
   hashString := blob.HashString()
   cachePath := path.Join(*cache_root, hashString[:2], hashString[2:])
@@ -150,16 +150,25 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   }
 }
 
-func (tree Blob) MonitorTree(input chan FileUpdate) {
+func (tree *Blob) MonitorTree(input chan FileUpdate) {
   // XXX ideally, this would be a B-Tree with distributed caching
   var children = map[string]*Blob{}
   updateSelf := func() {
-    pbtree := sharedpb.Tree{}
-
+    pbtree := sharedpb.Tree{ Entries: []*sharedpb.TreeEntry{} }
+    for name, blob := range children {
+      Flags := uint32(0644)
+      IsTree := false
+      pbtree.Entries = append(pbtree.Entries, &sharedpb.TreeEntry{
+        Hash: blob.Hash(),
+        Flags: &Flags,
+        IsTree: &IsTree,
+        Name: &name,
+      })
+    }
     tree.bytes, _ = proto.Marshal(&pbtree)
     tree.hash = nil
     tree.EnsureCached()
-    tree.revisionChannel <- &tree
+    tree.revisionChannel <- tree
   }
   for {
     select {
