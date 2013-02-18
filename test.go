@@ -15,6 +15,8 @@ import (
 var watch_target *string = flag.String("watch", "_sync", "The directory to sync")
 var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
 
+var processChannel = make(chan FileEvent, 100) // debouncing
+
 type Blob struct {
   bytes  []byte
   hash   []byte
@@ -31,14 +33,17 @@ type Blob struct {
   // Channel to communicate with map of children
   childrenChannel chan string
 
+  // Channel to send self-updates to.  This maybe should move to
+  // a more flexible pub/sub type deal in the future.
+  revisionChannel chan *Blob
+
   // non-nil for everything except share roots:
   parent *Blob
 
   is_tree bool
   is_file bool
 
-  // XXX for top level file: mode flags, timestamps?
-  // XXX for top level tree: ?
+  // XXX for tree entries: mode flags
 }
 
 type Commit struct {
@@ -92,6 +97,10 @@ func (blob Blob) ShortHash() []byte {
   return blob.Hash()[:8]
 }
 
+func (blob Blob) ShortHashString() string {
+  return fmt.Sprintf("%#x", blob.ShortHash())
+}
+
 func MakeEmptyFileBlob(path string) *Blob {
   return &Blob{path: path, is_tree: false, is_file: true}
 }
@@ -100,18 +109,18 @@ func MakeFileBlob(path string, hash []byte) *Blob {
   return &Blob{path: path, hash: hash, is_tree: false, is_file: true}
 }
 
-func WatchTree(watchPath string, updateChannel chan FileEvent, resultChannel chan FileUpdate) {
+func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   watcher, _ := fsnotify.NewWatcher()
   watcher.Watch(watchPath)
   var files, _ = ioutil.ReadDir(watchPath)
   for _, file := range files {
-    updateChannel <- FileEvent{path.Join(watchPath, file.Name()), resultChannel}
+    processChannel <- FileEvent{path.Join(watchPath, file.Name()), resultChannel}
   }
   for {
     select {
       case event := <-watcher.Event:
         if event.IsCreate() || event.IsModify() || event.IsDelete() || event.IsRename() {
-          updateChannel <- FileEvent{event.Name, resultChannel}
+          processChannel <- FileEvent{event.Name, resultChannel}
         } else {
           log.Fatal("unknown event type", event)
         }
@@ -132,6 +141,7 @@ func CloneTreeBlob(blob *Blob) *Blob {
     is_tree: blob.is_tree,
     is_file: blob.is_file,
     children: children,
+    revisionChannel: blob.revisionChannel,
     childrenChannel: make(chan string, 10),
   }
 }
@@ -141,7 +151,7 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
   bubbleModifiedClone := func (f func(*Blob)) {
     newTree := CloneTreeBlob(&tree)
     f(newTree)
-    // send newTree to a to-be-added tree-channel for partial commits
+    tree.revisionChannel <- newTree
   }
   for {
     select {
@@ -171,22 +181,42 @@ func (tree Blob) MonitorTree(input chan FileUpdate) {
   }
 }
 
-func MakeTreeBlob(path string, parent *Blob, updateChannel chan FileEvent) *Blob {
+func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob) *Blob {
   me := Blob{
     path: path,
     parent: parent,
     is_tree: true,
     is_file: false,
     childrenChannel: make(chan string, 10),
+    revisionChannel: revisionChannel,
   }
   resultChannel := make(chan FileUpdate, 10)
   go me.MonitorTree(resultChannel)
-  go WatchTree(me.path, updateChannel, resultChannel)
+  go WatchTree(me.path, resultChannel)
   return &me
 }
 
-func MakeCommit(path string, previous *Commit, updateChannel chan FileEvent) *Commit {
-  return &Commit{root: MakeTreeBlob(path, nil, updateChannel), previous: previous}
+func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
+  for {
+    select {
+      case newTree := <-revisionChannel:
+        commit.root = newTree
+        log.Printf("New branch revision: %s", newTree.ShortHashString())
+    }
+  }
+}
+
+func MakeBranch(path string, previous *Commit, root *Blob) *Commit {
+  revisionChannel := make(chan *Blob, 10)
+  if root == nil {
+    root = MakeTreeBlob(path, nil, revisionChannel)
+  }
+  me := Commit{
+    root: root,
+    previous: previous,
+  }
+  go me.WatchRevisions(revisionChannel)
+  return &me
 }
 
 type FileUpdate struct {
@@ -277,15 +307,14 @@ func main() {
   flag.Parse()
   log.Println("Started.")
   go restartOnChange()
-  var processChannel = make(chan FileEvent, 100)
-  var debounceChannel = make(chan FileEvent, 100)
+  var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
   for i := 0; i < WORKER_COUNT; i++ {
-    go processChange(*cache_root, processChannel)
+    go processChange(*cache_root, processImmChannel)
   }
-  go debounce(processChannel, debounceChannel)
+  go debounce(processImmChannel, processChannel)
 
-  MakeCommit(*watch_target, nil, debounceChannel)
+  MakeBranch(*watch_target, nil, nil)
 
   select {}
 }
