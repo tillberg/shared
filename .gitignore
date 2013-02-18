@@ -22,6 +22,6 @@ _testmain.go
 
 *.exe
 
-/_sync
-/_cache
+/_sync*
+/_cache*
 /sharedpb
