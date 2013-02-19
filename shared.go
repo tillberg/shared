@@ -305,6 +305,12 @@ func restartOnChange() {
   os.Exit(0)
 }
 
+func WriteUvarint(writer *bufio.Writer, number uint64) {
+  buf := make([]byte, 8)
+  binary.PutUvarint(buf, number)
+  writer.Write(buf)
+}
+
 func makeConnection(remoteAddr string) {
   for {
     conn, err := net.Dial("tcp", remoteAddr)
@@ -313,8 +319,8 @@ func makeConnection(remoteAddr string) {
     }
     log.Printf("Connected to %s.", remoteAddr)
     writer := bufio.NewWriter(conn)
-    number := uint32(42)
-    binary.Write(writer, binary.LittleEndian, number)
+    number := uint64(42)
+    WriteUvarint(writer, number)
     writer.Flush()
     select {}
   }
@@ -324,14 +330,7 @@ func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
   for {
     reader := bufio.NewReader(conn)
-    // buf := [4]byte
-    // _, err := io.ReadFull(reader, buf)
-    // if err != nil {
-    //   log.Print(err)
-    //   return
-    // }
-    msg_size := uint32(0)
-    err := binary.Read(reader, binary.LittleEndian, &msg_size)
+    msg_size, err := binary.ReadUvarint(reader)
     if err != nil {
       log.Print(err)
       return
