@@ -79,21 +79,25 @@ func GetCachePath(hash Hash) string {
 func GetBlob(hash Hash) *Blob {
   cachePath := GetCachePath(hash)
   _, err := os.Stat(cachePath)
-  if err != nil {
-    return MakeFileBlobFromHash(hash)
+  var blob *Blob
+  if err == nil {
+    log.Printf("Found %s in cache", GetShortHexString(hash))
+    blob = MakeFileBlobFromHash(hash)
+  } else {
+    responseChannel := make(chan *Blob)
+    // XXX this should be more ... targetted
+    // XXX also, there's a race condition between looking on disk
+    // and subscribing to object reception.  I think.  Maybe not.
+    // Maybe we'll just make a duplicate network request.
+    log.Printf("Requesting %s", GetShortHexString(hash))
+    broadcastChannel <- &Request{
+      message: &sharedpb.Message{HashRequest: hash},
+      responseChannel: responseChannel,
+    }
+    blob = <-responseChannel
+    log.Printf("Received %s", GetShortHexString(hash))
+    blob.EnsureCached()
   }
-  responseChannel := make(chan *Blob)
-  // XXX this should be more ... targetted
-  // XXX also, there's a race condition between looking on disk
-  // and subscribing to object reception.  I think.  Maybe not.
-  // Maybe we'll just make a duplicate network request.
-  log.Printf("Requesting %s", GetShortHexString(hash))
-  broadcastChannel <- &Request{
-    message: &sharedpb.Message{HashRequest: hash},
-    responseChannel: responseChannel,
-  }
-  blob := <-responseChannel
-  blob.EnsureCached()
   return blob
 }
 
@@ -141,6 +145,21 @@ func (blob *Blob) Hash() []byte {
     blob.hash = calculateHash(blob.bytes)
   }
   return blob.hash
+}
+
+func (blob *Blob) Bytes() []byte {
+  if blob.bytes == nil {
+    hash := blob.Hash()
+    if hash == nil {
+      log.Fatal("hash is nil")
+    }
+    bytes, err := ioutil.ReadFile(GetCachePath(hash))
+    if err != nil {
+      log.Fatal(err)
+    }
+    blob.bytes = bytes
+  }
+  return blob.bytes
 }
 
 func (blob *Blob) HashString() string {
@@ -226,9 +245,12 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
       log.Fatal(err)
     }
     children = map[string]*Blob{}
+    log.Printf("Unpacking %d entries", len(pbtree.Entries))
     for _, entry := range pbtree.Entries {
-      children[*entry.Name] = GetBlob(entry.Hash)
-      log.Printf("Unpacked %s %s", *entry.Name, entry.Hash)
+      blob := GetBlob(entry.Hash)
+      children[*entry.Name] = blob
+      ioutil.WriteFile(path.Join(*watch_target, *entry.Name), blob.Bytes(), 0644)
+      log.Printf("Unpacked %s %#x", *entry.Name, GetShortHexString(entry.Hash))
     }
   }
   for {
@@ -253,8 +275,8 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
         }
       case mergeHash := <-mergeChannel:
         blob := GetBlob(mergeHash)
-        tree.bytes = blob.bytes
-        tree.hash = blob.hash
+        tree.bytes = blob.Bytes()
+        tree.hash = blob.Hash()
         log.Printf("Merging %s into tree (%d bytes)", blob.ShortHashString(), len(tree.bytes))
         unpackSelf()
       // case lookup := <- tree.childrenChannel:
@@ -385,7 +407,7 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 
 func BroadcastHandler() {
   var subscribers []chan *sharedpb.Message
-  var objectSubscribers map[string][]chan *Blob
+  objectSubscribers := map[string][]chan *Blob{}
   for {
     select {
       case subscriber := <-subscribeChannel:
@@ -396,16 +418,25 @@ func BroadcastHandler() {
         }
         if request.message.HashRequest != nil {
           hash := GetHexString(request.message.HashRequest)
+          log.Printf("Waiting for %s", hash)
           if objectSubscribers[hash] == nil {
             objectSubscribers[hash] = []chan *Blob{}
           }
           objectSubscribers[hash] = append(objectSubscribers[hash], request.responseChannel)
         }
       case object := <-objectReceiveChannel:
-        for _, subscriber := range objectSubscribers[GetHexString(object.hash)] {
+        log.Printf("Forwarding %s", GetHexString(object.Hash()))
+        for _, subscriber := range objectSubscribers[GetHexString(object.Hash())] {
           subscriber <- object
         }
     }
+  }
+}
+
+func SendObject(hash Hash) {
+  blob := GetBlob(hash)
+  broadcastChannel <- &Request{
+    message: &sharedpb.Message{Object: &sharedpb.Object{Hash: blob.Hash(), Object: blob.Bytes()}},
   }
 }
 
@@ -450,6 +481,9 @@ func connIncoming(conn *net.TCPConn) {
     err = proto.Unmarshal(buf, message)
     if err != nil {
       log.Fatal(err)
+    }
+    if message.HashRequest != nil {
+      go SendObject(message.HashRequest)
     }
     if message.Object != nil {
       objectReceiveChannel <- MakeFileBlobFromBytes(message.Object.Object)
