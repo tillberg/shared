@@ -30,10 +30,14 @@ type Request struct {
 var processChannel = make(chan FileEvent, 100) // debouncing
 var broadcastChannel = make(chan *Request, 10)
 var subscribeChannel = make(chan chan *sharedpb.Message, 10)
+var objectReceiveChannel = make(chan *Blob, 100)
+var branchReceiveChannel = make(chan []byte, 10)
+
+type Hash []byte
 
 type Blob struct {
   bytes  []byte
-  hash   []byte
+  hash   Hash
 
   // non-empty for non-leaf files and trees:
   // segments []*Blob
@@ -63,18 +67,28 @@ func GetHexString(bytes []byte) string {
   return fmt.Sprintf("%#x", bytes)
 }
 
-func GetCachePath(hash []byte) string {
+func GetCachePath(hash Hash) string {
   hashString := GetHexString(hash)
   return path.Join(*cache_root, hashString[:2], hashString[2:])
 }
 
-func GetBlob(hash []byte) *Blob {
+func GetBlob(hash Hash) *Blob {
   cachePath := GetCachePath(hash)
   _, err := os.Stat(cachePath)
   if err != nil {
     return MakeFileBlobFromHash(hash)
   }
-  return nil
+  responseChannel := make(chan *Blob)
+  // XXX this should be more ... targetted
+  // XXX also, there's a race condition between looking on disk
+  // and subscribing to object reception.  I think.  Maybe not.
+  // Maybe we'll just make a duplicate network request.
+  broadcastChannel <- &Request{
+    message: &sharedpb.Message{HashRequest: hash},
+    responseChannel: responseChannel,
+  }
+  blob := <-responseChannel
+  return blob
 }
 
 func (b *Blob) FirstParent(f func(*Blob) bool) *Blob {
@@ -150,7 +164,7 @@ func MakeEmptyFileBlob() *Blob {
   return &Blob{is_tree: false, is_file: true}
 }
 
-func MakeFileBlobFromHash(hash []byte) *Blob {
+func MakeFileBlobFromHash(hash Hash) *Blob {
   return &Blob{hash: hash, is_tree: false, is_file: true}
 }
 
@@ -248,6 +262,9 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
           message: &sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}},
         }
         commit.root = newTree
+      case newRemoteTreeHash := <-branchReceiveChannel:
+        blob := Blob{hash: newRemoteTreeHash}
+        log.Printf("New remote revision: %s", blob.ShortHashString())
     }
   }
 }
@@ -342,6 +359,7 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 
 func BroadcastHandler() {
   var subscribers []chan *sharedpb.Message
+  var objectSubscribers map[string][]chan *Blob
   for {
     select {
       case subscriber := <-subscribeChannel:
@@ -349,6 +367,17 @@ func BroadcastHandler() {
       case request := <-broadcastChannel:
         for _, subscriber := range subscribers {
           subscriber <- request.message
+        }
+        if request.message.HashRequest != nil {
+          hash := GetHexString(request.message.HashRequest)
+          if objectSubscribers[hash] == nil {
+            objectSubscribers[hash] = []chan *Blob{}
+          }
+          objectSubscribers[hash] = append(objectSubscribers[hash], request.responseChannel)
+        }
+      case object := <-objectReceiveChannel:
+        for _, subscriber := range objectSubscribers[GetHexString(object.hash)] {
+          subscriber <- object
         }
     }
   }
@@ -396,7 +425,12 @@ func connIncoming(conn *net.TCPConn) {
     if err != nil {
       log.Fatal(err)
     }
-
+    if message.Object != nil {
+      objectReceiveChannel <- MakeFileBlobFromBytes(message.Object.Object)
+    }
+    if message.Branch != nil {
+      branchReceiveChannel <- message.Branch.Hash
+    }
   }
 }
 
