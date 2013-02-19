@@ -192,7 +192,7 @@ func (tree *Blob) MonitorTree(input chan FileUpdate) {
              children[filename].HashString() != fileUpdate.blob.HashString() {
             op := "Added"
             if children[filename] != nil { op = "Updated" }
-            log.Printf("%s %s %d %#x\n", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
+            log.Printf("%s %s %d %#x", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
             children[filename] = fileUpdate.blob
             updateSelf()
           }
@@ -312,8 +312,8 @@ func restartOnChange() {
 
 func WriteUvarint(writer *bufio.Writer, number uint64) {
   buf := make([]byte, 8)
-  binary.PutUvarint(buf, number)
-  writer.Write(buf)
+  numBytes := binary.PutUvarint(buf, number)
+  writer.Write(buf[:numBytes])
 }
 
 func BroadcastHandler() {
@@ -341,10 +341,14 @@ func connOutgoing(conn *net.TCPConn) {
       }
       writer := bufio.NewWriter(conn)
       WriteUvarint(writer, uint64(len(marshaled)))
-      _, err = writer.Write(marshaled)
+      num, err := writer.Write(marshaled)
       if err != nil {
         log.Fatal(err)
       }
+      if len(marshaled) != num {
+        log.Fatal("Sent %d bytes when I needed to send %d", num, len(marshaled))
+      }
+      log.Printf("Sent %d bytes: %#x", num, marshaled)
       writer.Flush()
   }
 }
@@ -355,16 +359,14 @@ func connIncoming(conn *net.TCPConn) {
     msg_size, err := binary.ReadUvarint(reader)
     if err != nil {
       log.Fatal(err)
-      return
     }
     log.Printf("Message size: %d", msg_size)
     buf := make([]byte, msg_size)
-    _, err = io.ReadFull(reader, buf)
+    num, err := io.ReadFull(reader, buf)
     if err != nil {
       log.Fatal(err)
     }
-    log.Println("Received message")
-
+    log.Printf("Received message %d bytes long: %#x", num, buf)
     message := &sharedpb.Message{}
     err = proto.Unmarshal(buf, message)
     if err != nil {
@@ -414,7 +416,7 @@ func main() {
   if err != nil {
     log.Fatal(err)
   }
-  log.Printf("Listening on port %d.\n", *listen_port)
+  log.Printf("Listening on port %d.", *listen_port)
   // XXX omg kludge.  Need to figure out how to properly negotiate
   // unique full-duplex P2P connections.
   if *listen_port == 9252 {
