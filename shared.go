@@ -221,7 +221,8 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
     select {
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
-        broadcastChannel <- sharedpb.Message{Branch: &sharedpb.Branch{Hash: newTree.Hash()}}
+        name := "master"
+        broadcastChannel <- sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
         commit.root = newTree
     }
   }
@@ -334,10 +335,13 @@ func connOutgoing(conn *net.TCPConn) {
   subscribeChannel <- subscription
   for {
     message := <- subscription
-      marshaled, _ := proto.Marshal(&message)
+      marshaled, err := proto.Marshal(&message)
+      if err != nil {
+        log.Fatal(err)
+      }
       writer := bufio.NewWriter(conn)
       WriteUvarint(writer, uint64(len(marshaled)))
-      _, err := writer.Write(marshaled)
+      _, err = writer.Write(marshaled)
       if err != nil {
         log.Fatal(err)
       }
@@ -360,6 +364,13 @@ func connIncoming(conn *net.TCPConn) {
       log.Fatal(err)
     }
     log.Println("Received message")
+
+    message := &sharedpb.Message{}
+    err = proto.Unmarshal(buf, message)
+    if err != nil {
+      log.Fatal(err)
+    }
+
   }
 }
 
@@ -371,19 +382,19 @@ func makeConnection(remoteAddr *net.TCPAddr) {
     }
     log.Printf("Connected to %s.", remoteAddr)
     go connOutgoing(conn)
-    go connIncoming(conn)
-    select {}
+    connIncoming(conn)
   }
 }
 
 func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
   go connOutgoing(conn)
-  go connIncoming(conn)
+  connIncoming(conn)
 }
 
 func main() {
   flag.Parse()
+  log.SetFlags(log.Ltime | log.Lshortfile)
   go restartOnChange()
   var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
