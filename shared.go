@@ -10,6 +10,7 @@ import (
   "path"
   "net"
   "bufio"
+  "io"
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
@@ -22,8 +23,8 @@ var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache
 var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 
 var processChannel = make(chan FileEvent, 100) // debouncing
-var broadcastChannel = make(chan string, 10)
-var subscribeChannel = make(chan chan string, 10)
+var broadcastChannel = make(chan sharedpb.Message, 10)
+var subscribeChannel = make(chan chan sharedpb.Message, 10)
 
 type Blob struct {
   bytes  []byte
@@ -220,6 +221,7 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
     select {
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
+        broadcastChannel <- sharedpb.Message{Branch: &sharedpb.Branch{Hash: newTree.Hash()}}
         commit.root = newTree
     }
   }
@@ -314,7 +316,7 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 }
 
 func BroadcastHandler() {
-  var subscribers []chan string
+  var subscribers []chan sharedpb.Message
   for {
     select {
       case subscriber := <-subscribeChannel:
@@ -328,15 +330,18 @@ func BroadcastHandler() {
 }
 
 func connOutgoing(conn *net.TCPConn) {
-  writer := bufio.NewWriter(conn)
-  number := uint64(42)
-  WriteUvarint(writer, number)
-  writer.Flush()
-  subscription := make(chan string, 10)
+  subscription := make(chan sharedpb.Message, 10)
   subscribeChannel <- subscription
   for {
     message := <- subscription
-    log.Println(message)
+      marshaled, _ := proto.Marshal(&message)
+      writer := bufio.NewWriter(conn)
+      WriteUvarint(writer, uint64(len(marshaled)))
+      _, err := writer.Write(marshaled)
+      if err != nil {
+        log.Fatal(err)
+      }
+      writer.Flush()
   }
 }
 
@@ -345,13 +350,16 @@ func connIncoming(conn *net.TCPConn) {
     reader := bufio.NewReader(conn)
     msg_size, err := binary.ReadUvarint(reader)
     if err != nil {
-      log.Print(err)
+      log.Fatal(err)
       return
     }
-    log.Printf("Received a %d", msg_size)
-    select {
-
+    log.Printf("Message size: %d", msg_size)
+    buf := make([]byte, msg_size)
+    _, err = io.ReadFull(reader, buf)
+    if err != nil {
+      log.Fatal(err)
     }
+    log.Println("Received message")
   }
 }
 

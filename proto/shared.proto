@@ -1,5 +1,21 @@
 package sharedpb;
 
+message Message {
+  optional bytes HashRequest = 1;
+  optional Object Object = 2;
+  optional Branch Branch = 9;
+}
+
+message Object {
+  required bytes Hash = 1;
+  required bytes Object = 2;
+}
+
+message Branch {
+  required string Name = 1;
+  required bytes Hash = 2;
+}
+
 message Commit {
   required bytes Root = 1;
   repeated bytes Previous = 2;
