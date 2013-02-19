@@ -63,6 +63,10 @@ type Commit struct {
   previous *Commit
 }
 
+func GetShortHexString(bytes []byte) string {
+  return GetHexString(bytes[:8])
+}
+
 func GetHexString(bytes []byte) string {
   return fmt.Sprintf("%#x", bytes)
 }
@@ -83,11 +87,13 @@ func GetBlob(hash Hash) *Blob {
   // XXX also, there's a race condition between looking on disk
   // and subscribing to object reception.  I think.  Maybe not.
   // Maybe we'll just make a duplicate network request.
+  log.Printf("Requesting %s", GetShortHexString(hash))
   broadcastChannel <- &Request{
     message: &sharedpb.Message{HashRequest: hash},
     responseChannel: responseChannel,
   }
   blob := <-responseChannel
+  blob.EnsureCached()
   return blob
 }
 
@@ -193,7 +199,7 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   }
 }
 
-func (tree *Blob) MonitorTree(input chan FileUpdate) {
+func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
   // XXX ideally, this would be a B-Tree with distributed caching
   var children = map[string]*Blob{}
   updateSelf := func() {
@@ -212,6 +218,18 @@ func (tree *Blob) MonitorTree(input chan FileUpdate) {
     tree.hash = nil
     tree.EnsureCached()
     tree.revisionChannel <- tree
+  }
+  unpackSelf := func() {
+    pbtree := &sharedpb.Tree{}
+    err := proto.Unmarshal(tree.bytes, pbtree)
+    if err != nil {
+      log.Fatal(err)
+    }
+    children = map[string]*Blob{}
+    for _, entry := range pbtree.Entries {
+      children[*entry.Name] = GetBlob(entry.Hash)
+      log.Printf("Unpacked %s %s", *entry.Name, entry.Hash)
+    }
   }
   for {
     select {
@@ -233,12 +251,18 @@ func (tree *Blob) MonitorTree(input chan FileUpdate) {
             updateSelf()
           }
         }
+      case mergeHash := <-mergeChannel:
+        blob := GetBlob(mergeHash)
+        tree.bytes = blob.bytes
+        tree.hash = blob.hash
+        log.Printf("Merging %s into tree (%d bytes)", blob.ShortHashString(), len(tree.bytes))
+        unpackSelf()
       // case lookup := <- tree.childrenChannel:
     }
   }
 }
 
-func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob) *Blob {
+func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob, mergeChannel chan Hash) *Blob {
   me := Blob{
     parent: parent,
     is_tree: true,
@@ -247,12 +271,12 @@ func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob) *Blob {
     revisionChannel: revisionChannel,
   }
   resultChannel := make(chan FileUpdate, 10)
-  go me.MonitorTree(resultChannel)
+  go me.MonitorTree(resultChannel, mergeChannel)
   go WatchTree(path, resultChannel)
   return &me
 }
 
-func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
+func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel chan Hash) {
   for {
     select {
       case newTree := <-revisionChannel:
@@ -263,22 +287,24 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
         }
         commit.root = newTree
       case newRemoteTreeHash := <-branchReceiveChannel:
-        blob := Blob{hash: newRemoteTreeHash}
-        log.Printf("New remote revision: %s", blob.ShortHashString())
+        // blob := &Blob{hash: newRemoteTreeHash}
+        // log.Printf("New remote revision: %s", GetHexString(newRemoteTreeHash[:8]))
+        mergeChannel <- newRemoteTreeHash
     }
   }
 }
 
 func MakeBranch(path string, previous *Commit, root *Blob) *Commit {
   revisionChannel := make(chan *Blob, 10)
+  mergeChannel := make(chan Hash, 10)
   if root == nil {
-    root = MakeTreeBlob(path, nil, revisionChannel)
+    root = MakeTreeBlob(path, nil, revisionChannel, mergeChannel)
   }
   me := Commit{
     root: root,
     previous: previous,
   }
-  go me.WatchRevisions(revisionChannel)
+  go me.WatchRevisions(revisionChannel, mergeChannel)
   return &me
 }
 
