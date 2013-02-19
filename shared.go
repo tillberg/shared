@@ -7,6 +7,7 @@ import (
   "log"
   "time"
   "path"
+  "net"
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
@@ -16,6 +17,7 @@ import (
 
 var watch_target *string = flag.String("watch", "_sync", "The directory to sync")
 var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
+var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 
 var processChannel = make(chan FileEvent, 100) // debouncing
 
@@ -283,7 +285,7 @@ func debounce(output chan FileEvent, input chan FileEvent) {
         if !waiting[in.path] {
           waiting[in.path] = true
           go func(_in FileEvent) {
-              time.Sleep(100 * time.Millisecond)
+              time.Sleep(5 * time.Millisecond)
               timeout_channel <- _in
           }(in)
         }
@@ -301,9 +303,12 @@ func restartOnChange() {
   os.Exit(0)
 }
 
+func handleConnection(conn *net.TCPConn) {
+
+}
+
 func main() {
   flag.Parse()
-  log.Println("Started.")
   go restartOnChange()
   var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
@@ -314,5 +319,21 @@ func main() {
 
   MakeBranch(*watch_target, nil, nil)
 
-  select {}
+  addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", *listen_port));
+  if err != nil {
+    log.Fatal(err)
+  }
+  ln, err := net.ListenTCP("tcp", addr)
+  if err != nil {
+    log.Fatal(err)
+  }
+  log.Printf("Listening on port %d.\n", *listen_port)
+  for {
+    conn, err := ln.AcceptTCP()
+    if err != nil {
+      log.Print(err)
+      continue
+    }
+    go handleConnection(conn)
+  }
 }
