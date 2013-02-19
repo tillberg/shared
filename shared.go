@@ -1,6 +1,7 @@
 package main
 
 import (
+  "encoding/binary"
   "flag"
   "fmt"
   "os"
@@ -8,6 +9,7 @@ import (
   "time"
   "path"
   "net"
+  "bufio"
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
@@ -305,17 +307,37 @@ func restartOnChange() {
 
 func makeConnection(remoteAddr string) {
   for {
-    _, err := net.Dial("tcp", remoteAddr)
+    conn, err := net.Dial("tcp", remoteAddr)
     if err != nil {
       log.Print(err)
     }
     log.Printf("Connected to %s.", remoteAddr)
+    writer := bufio.NewWriter(conn)
+    number := uint32(42)
+    binary.Write(writer, binary.LittleEndian, number)
+    writer.Flush()
     select {}
   }
 }
 
 func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
+  for {
+    reader := bufio.NewReader(conn)
+    // buf := [4]byte
+    // _, err := io.ReadFull(reader, buf)
+    // if err != nil {
+    //   log.Print(err)
+    //   return
+    // }
+    msg_size := uint32(0)
+    err := binary.Read(reader, binary.LittleEndian, &msg_size)
+    if err != nil {
+      log.Print(err)
+      return
+    }
+    log.Printf("Received a %d", msg_size)
+  }
 }
 
 func main() {
