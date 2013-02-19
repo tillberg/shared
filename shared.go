@@ -22,6 +22,8 @@ var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache
 var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 
 var processChannel = make(chan FileEvent, 100) // debouncing
+var broadcastChannel = make(chan string, 10)
+var subscribeChannel = make(chan chan string, 10)
 
 type Blob struct {
   bytes  []byte
@@ -311,23 +313,34 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
   writer.Write(buf)
 }
 
-func makeConnection(remoteAddr string) {
+func BroadcastHandler() {
+  var subscribers []chan string
   for {
-    conn, err := net.Dial("tcp", remoteAddr)
-    if err != nil {
-      log.Print(err)
+    select {
+      case subscriber := <-subscribeChannel:
+        subscribers = append(subscribers, subscriber)
+      case message := <-broadcastChannel:
+        for _, subscriber := range subscribers {
+          subscriber <- message
+        }
     }
-    log.Printf("Connected to %s.", remoteAddr)
-    writer := bufio.NewWriter(conn)
-    number := uint64(42)
-    WriteUvarint(writer, number)
-    writer.Flush()
-    select {}
   }
 }
 
-func handleConnection(conn *net.TCPConn) {
-  log.Printf("Connection received from %s", conn.RemoteAddr().String())
+func connOutgoing(conn *net.TCPConn) {
+  writer := bufio.NewWriter(conn)
+  number := uint64(42)
+  WriteUvarint(writer, number)
+  writer.Flush()
+  subscription := make(chan string, 10)
+  subscribeChannel <- subscription
+  for {
+    message := <- subscription
+    log.Println(message)
+  }
+}
+
+func connIncoming(conn *net.TCPConn) {
   for {
     reader := bufio.NewReader(conn)
     msg_size, err := binary.ReadUvarint(reader)
@@ -336,7 +349,29 @@ func handleConnection(conn *net.TCPConn) {
       return
     }
     log.Printf("Received a %d", msg_size)
+    select {
+
+    }
   }
+}
+
+func makeConnection(remoteAddr *net.TCPAddr) {
+  for {
+    conn, err := net.DialTCP("tcp", nil, remoteAddr)
+    if err != nil {
+      log.Fatal(err)
+    }
+    log.Printf("Connected to %s.", remoteAddr)
+    go connOutgoing(conn)
+    go connIncoming(conn)
+    select {}
+  }
+}
+
+func handleConnection(conn *net.TCPConn) {
+  log.Printf("Connection received from %s", conn.RemoteAddr().String())
+  go connOutgoing(conn)
+  go connIncoming(conn)
 }
 
 func main() {
@@ -348,14 +383,15 @@ func main() {
     go processChange(processImmChannel)
   }
   go debounce(processImmChannel, processChannel)
+  go BroadcastHandler()
 
   MakeBranch(*watch_target, nil, nil)
 
-  addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", *listen_port));
+  listen_addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", *listen_port));
   if err != nil {
     log.Fatal(err)
   }
-  ln, err := net.ListenTCP("tcp", addr)
+  ln, err := net.ListenTCP("tcp", listen_addr)
   if err != nil {
     log.Fatal(err)
   }
@@ -363,7 +399,11 @@ func main() {
   // XXX omg kludge.  Need to figure out how to properly negotiate
   // unique full-duplex P2P connections.
   if *listen_port == 9252 {
-    go makeConnection("127.0.0.1:9251")
+    remote_addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:9251");
+    if err != nil {
+      log.Fatal(err)
+    }
+    go makeConnection(remote_addr)
   }
   for {
     conn, err := ln.AcceptTCP()
