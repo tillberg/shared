@@ -22,9 +22,14 @@ var watch_target *string = flag.String("watch", "_sync", "The directory to sync"
 var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
 var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 
+type Request struct {
+  message         *sharedpb.Message
+  responseChannel chan *Blob
+}
+
 var processChannel = make(chan FileEvent, 100) // debouncing
-var broadcastChannel = make(chan sharedpb.Message, 10)
-var subscribeChannel = make(chan chan sharedpb.Message, 10)
+var broadcastChannel = make(chan *Request, 10)
+var subscribeChannel = make(chan chan *sharedpb.Message, 10)
 
 type Blob struct {
   bytes  []byte
@@ -52,6 +57,24 @@ type Blob struct {
 type Commit struct {
   root     *Blob
   previous *Commit
+}
+
+func GetHexString(bytes []byte) string {
+  return fmt.Sprintf("%#x", bytes)
+}
+
+func GetCachePath(hash []byte) string {
+  hashString := GetHexString(hash)
+  return path.Join(*cache_root, hashString[:2], hashString[2:])
+}
+
+func GetBlob(hash []byte) *Blob {
+  cachePath := GetCachePath(hash)
+  _, err := os.Stat(cachePath)
+  if err != nil {
+    return MakeFileBlobFromHash(hash)
+  }
+  return nil
 }
 
 func (b *Blob) FirstParent(f func(*Blob) bool) *Blob {
@@ -101,7 +124,7 @@ func (blob *Blob) Hash() []byte {
 }
 
 func (blob *Blob) HashString() string {
-  return fmt.Sprintf("%#x", blob.Hash())
+  return GetHexString(blob.Hash())
 }
 
 func (blob *Blob) ShortHash() []byte {
@@ -109,18 +132,17 @@ func (blob *Blob) ShortHash() []byte {
 }
 
 func (blob *Blob) ShortHashString() string {
-  return fmt.Sprintf("%#x", blob.ShortHash())
+  return GetHexString(blob.ShortHash())
 }
 
 func (blob *Blob) EnsureCached() {
   // Save a copy in the cache if we don't already have one
-  hashString := blob.HashString()
-  cachePath := path.Join(*cache_root, hashString[:2], hashString[2:])
+  cachePath := GetCachePath(blob.Hash())
   _, err := os.Stat(cachePath)
   if err != nil {
-    os.MkdirAll(path.Join(*cache_root, hashString[:2]), 0755)
+    os.MkdirAll(path.Dir(cachePath), 0755)
     ioutil.WriteFile(cachePath, blob.bytes, 0644)
-    log.Printf("Cached %s", hashString[:16])
+    log.Printf("Cached %s", blob.ShortHashString())
   }
 }
 
@@ -222,7 +244,9 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob) {
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
         name := "master"
-        broadcastChannel <- sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
+        broadcastChannel <- &Request{
+          message: &sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}},
+        }
         commit.root = newTree
     }
   }
@@ -317,25 +341,25 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 }
 
 func BroadcastHandler() {
-  var subscribers []chan sharedpb.Message
+  var subscribers []chan *sharedpb.Message
   for {
     select {
       case subscriber := <-subscribeChannel:
         subscribers = append(subscribers, subscriber)
-      case message := <-broadcastChannel:
+      case request := <-broadcastChannel:
         for _, subscriber := range subscribers {
-          subscriber <- message
+          subscriber <- request.message
         }
     }
   }
 }
 
 func connOutgoing(conn *net.TCPConn) {
-  subscription := make(chan sharedpb.Message, 10)
+  subscription := make(chan *sharedpb.Message, 10)
   subscribeChannel <- subscription
   for {
     message := <- subscription
-      marshaled, err := proto.Marshal(&message)
+      marshaled, err := proto.Marshal(message)
       if err != nil {
         log.Fatal(err)
       }
