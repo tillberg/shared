@@ -303,8 +303,19 @@ func restartOnChange() {
   os.Exit(0)
 }
 
-func handleConnection(conn *net.TCPConn) {
+func makeConnection(remoteAddr string) {
+  for {
+    _, err := net.Dial("tcp", remoteAddr)
+    if err != nil {
+      log.Print(err)
+    }
+    log.Printf("Connected to %s.", remoteAddr)
+    select {}
+  }
+}
 
+func handleConnection(conn *net.TCPConn) {
+  log.Printf("Connection received from %s", conn.RemoteAddr().String())
 }
 
 func main() {
@@ -328,6 +339,11 @@ func main() {
     log.Fatal(err)
   }
   log.Printf("Listening on port %d.\n", *listen_port)
+  // XXX omg kludge.  Need to figure out how to properly negotiate
+  // unique full-duplex P2P connections.
+  if *listen_port == 9252 {
+    go makeConnection("127.0.0.1:9251")
+  }
   for {
     conn, err := ln.AcceptTCP()
     if err != nil {
