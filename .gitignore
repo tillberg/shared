@@ -25,3 +25,4 @@ _testmain.go
 /_sync*
 /_cache*
 /src/sharedpb
+/shared
