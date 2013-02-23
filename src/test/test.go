@@ -52,11 +52,16 @@ type TestSetup struct {
     quit chan string
 }
 
+func CleanDir(path string) {
+    exec.Command("/bin/rm", "-rf", path).Run()
+    exec.Command("/bin/mkdir", path).Run()
+}
+
 func SetUp() *TestSetup {
-    exec.Command("rm", "-rf", "/tmp/sync1").Run()
-    exec.Command("mkdir", "/tmp/sync1").Run()
-    exec.Command("rm", "-rf", "/tmp/sync2").Run()
-    exec.Command("mkdir", "/tmp/sync2").Run()
+    CleanDir("/tmp/cache1")
+    CleanDir("/tmp/cache2")
+    CleanDir("/tmp/sync1")
+    CleanDir("/tmp/sync2")
 
     setup := TestSetup{ready: make(chan string), quit: make(chan string)}
     go Launch("A", "/tmp/cache1", "/tmp/sync1", "9251", setup)

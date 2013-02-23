@@ -251,7 +251,7 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
       blob := GetBlob(entry.Hash)
       children[*entry.Name] = blob
       ioutil.WriteFile(path.Join(*watch_target, *entry.Name), blob.Bytes(), 0644)
-      log.Printf("Unpacked %s %#x", *entry.Name, GetShortHexString(entry.Hash))
+      log.Printf("Unpacked %s %s", *entry.Name, GetShortHexString(entry.Hash))
     }
   }
   for {
@@ -419,7 +419,7 @@ func BroadcastHandler() {
         }
         if request.message.HashRequest != nil {
           hash := GetHexString(request.message.HashRequest)
-          log.Printf("Waiting for %s", hash)
+          log.Printf("Waiting for %s", GetShortHexString(request.message.HashRequest))
           if objectSubscribers[hash] == nil {
             objectSubscribers[hash] = []chan *Blob{}
           }
@@ -441,6 +441,18 @@ func SendObject(hash Hash) {
   }
 }
 
+func MessageString(m *sharedpb.Message) string {
+  if m.HashRequest != nil {
+    return fmt.Sprintf("{HashRequest: %s}", GetShortHexString(m.HashRequest))
+  } else if m.Branch != nil {
+    return fmt.Sprintf("{Branch: %s -> %s}", *m.Branch.Name, GetShortHexString(m.Branch.Hash))
+  } else if m.Object != nil {
+    return fmt.Sprintf("{Object: %s -> %d bytes}", GetShortHexString(m.Object.Hash), len(m.Object.Object))
+  }
+  log.Fatal("Unknown message: ", m)
+  return ""
+}
+
 func connOutgoing(conn *net.TCPConn) {
   subscription := make(chan *sharedpb.Message, 10)
   subscribeChannel <- subscription
@@ -459,7 +471,7 @@ func connOutgoing(conn *net.TCPConn) {
       if len(marshaled) != num {
         log.Fatal("Sent %d bytes when I needed to send %d", num, len(marshaled))
       }
-      log.Printf("Sent %d bytes: %#x", num, marshaled)
+      log.Printf("Sent %d bytes: %s", num, MessageString(message))
       writer.Flush()
   }
 }
@@ -477,12 +489,12 @@ func connIncoming(conn *net.TCPConn) {
     if err != nil {
       log.Fatal(err)
     }
-    log.Printf("Received message %d bytes long: %#x", num, buf)
     message := &sharedpb.Message{}
     err = proto.Unmarshal(buf, message)
     if err != nil {
       log.Fatal(err)
     }
+    log.Printf("Received %d bytes: %s", num, MessageString(message))
     if message.HashRequest != nil {
       go SendObject(message.HashRequest)
     }
