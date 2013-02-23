@@ -227,11 +227,12 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
     for name, blob := range children {
       Flags := uint32(0644)
       IsTree := false
+      Name := name
       pbtree.Entries = append(pbtree.Entries, &sharedpb.TreeEntry{
         Hash: blob.Hash(),
         Flags: &Flags,
         IsTree: &IsTree,
-        Name: &name,
+        Name: &Name,
       })
     }
     tree.bytes, _ = proto.Marshal(&pbtree)
@@ -362,12 +363,7 @@ func processChange(inputChannel chan FileEvent) {
         blob := MakeFileBlobFromBytes(bytes)
         blob.EnsureCached()
         // Send the update back to the tree's result channel
-        event.resultChannel <- FileUpdate{
-          blob,
-          event.path,
-          true,
-          statbuf.Size(),
-        }
+        event.resultChannel <- FileUpdate{blob, event.path, true, statbuf.Size()}
       }
     }
   }
@@ -391,13 +387,6 @@ func debounce(output chan FileEvent, input chan FileEvent) {
         output <- ready
     }
   }
-}
-
-func restartOnChange() {
-  watcher, _ := fsnotify.NewWatcher()
-  watcher.Watch("shared.go")
-  <-watcher.Event
-  os.Exit(0)
 }
 
 func WriteUvarint(writer *bufio.Writer, number uint64) {
@@ -483,7 +472,6 @@ func connIncoming(conn *net.TCPConn) {
     if err != nil {
       log.Fatal(err)
     }
-    log.Printf("Message size: %d", msg_size)
     buf := make([]byte, msg_size)
     num, err := io.ReadFull(reader, buf)
     if err != nil {
@@ -539,6 +527,13 @@ func ListenForConnections(ln *net.TCPListener) {
     }
     go handleConnection(conn)
   }
+}
+
+func restartOnChange() {
+  watcher, _ := fsnotify.NewWatcher()
+  watcher.Watch("shared.go")
+  <-watcher.Event
+  os.Exit(0)
 }
 
 func main() {
