@@ -4,4 +4,4 @@ mkdir -p src/sharedpb
 protoc -I=proto/ --go_out=src/sharedpb/ proto/shared.proto
 
 go build src/shared.go
-go test src/shared_test.go -v -parallel 1 $*
+go test src/shared_test.go -parallel 1 $*

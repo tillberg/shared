@@ -317,7 +317,7 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel ch
         commit.root = newTree
       case newRemoteTreeHash := <-branchReceiveChannel:
         // blob := &Blob{hash: newRemoteTreeHash}
-        // log.Printf("New remote revision: %s", GetHexString(newRemoteTreeHash[:8]))
+        // log.Printf("New remote revision: %s", GetShortHexString(newRemoteTreeHash[:8]))
         mergeChannel <- newRemoteTreeHash
     }
   }
@@ -438,7 +438,7 @@ func BroadcastHandler() {
           objectSubscribers[hash] = append(objectSubscribers[hash], request.responseChannel)
         }
       case object := <-objectReceiveChannel:
-        log.Printf("Forwarding %s", GetHexString(object.Hash()))
+        // log.Printf("Forwarding %s", GetHexString(object.Hash()))
         for _, subscriber := range objectSubscribers[GetHexString(object.Hash())] {
           subscriber <- object
         }
@@ -469,13 +469,13 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   s := "master"
   outbox<-&sharedpb.Message{SubscribeBranch: &s}
   subscribeChannel <- outbox
+  writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
       marshaled, err := proto.Marshal(message)
       if err != nil {
         log.Fatal(err)
       }
-      writer := bufio.NewWriter(conn)
       WriteUvarint(writer, uint64(len(marshaled)))
       num, err := writer.Write(marshaled)
       if err != nil {
@@ -490,8 +490,8 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
 }
 
 func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
+  reader := bufio.NewReader(conn)
   for {
-    reader := bufio.NewReader(conn)
     msg_size, err := binary.ReadUvarint(reader)
     if err != nil {
       log.Fatal(err)
@@ -509,15 +509,14 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
     log.Printf("Received %d bytes: %s", num, MessageString(message))
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
-    }
-    if message.Object != nil {
+    } else if message.Object != nil {
       objectReceiveChannel <- MakeFileBlobFromBytes(message.Object.Object)
-    }
-    if message.Branch != nil {
+    } else if message.Branch != nil {
       branchReceiveChannel <- message.Branch.Hash
-    }
-    if message.SubscribeBranch != nil {
+    } else if message.SubscribeBranch != nil {
       branchSubscribeChannel <- &BranchSubscription{*message.SubscribeBranch, outbox}
+    } else {
+      log.Fatal("Unknown incoming message", MessageString(message))
     }
   }
 }
