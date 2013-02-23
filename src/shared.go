@@ -399,25 +399,25 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 }
 
 func ArbitBlobRequests() {
-  var blobRequestServicers []chan *sharedpb.Message
-  objectSubscribers := map[string][]chan *Blob{}
+  servicers := []chan *sharedpb.Message{}
+  subscribers := map[string][]chan *Blob{}
   for {
     select {
       case subscriber := <-subscribeChannel:
-        blobRequestServicers = append(blobRequestServicers, subscriber)
-      case blobRequest := <-blobRequestChannel:
-        for _, servicer := range blobRequestServicers {
-          servicer <- &sharedpb.Message{HashRequest: blobRequest.hash}
+        servicers = append(servicers, subscriber)
+      case request := <-blobRequestChannel:
+        for _, servicer := range servicers {
+          servicer <- &sharedpb.Message{HashRequest: request.hash}
         }
-        hashString := GetHexString(blobRequest.hash)
-        log.Printf("Waiting for %s", GetShortHexString(blobRequest.hash))
-        if objectSubscribers[hashString] == nil {
-          objectSubscribers[hashString] = []chan *Blob{}
+        hashString := GetHexString(request.hash)
+        log.Printf("Waiting for %s", GetShortHexString(request.hash))
+        if subscribers[hashString] == nil {
+          subscribers[hashString] = []chan *Blob{}
         }
-        objectSubscribers[hashString] = append(objectSubscribers[hashString], blobRequest.responseChannel)
+        subscribers[hashString] = append(subscribers[hashString], request.responseChannel)
       case object := <-objectReceiveChannel:
         // log.Printf("Forwarding %s", GetHexString(object.Hash()))
-        for _, subscriber := range objectSubscribers[GetHexString(object.Hash())] {
+        for _, subscriber := range subscribers[GetHexString(object.Hash())] {
           subscriber <- object
         }
     }
@@ -425,23 +425,23 @@ func ArbitBlobRequests() {
 }
 
 func ArbitBranchStatus() {
-  branchSubscribers := map[string][]chan *sharedpb.Message{}
-  branchStatuses := map[string]*sharedpb.Message{}
+  subscribers := map[string][]chan *sharedpb.Message{}
+  statuses := map[string]*sharedpb.Message{}
   for {
     select {
-      case branchSubscription := <-branchSubscribeChannel:
-        branch := branchSubscription.branch
-        if branchSubscribers[branch] == nil {
-          branchSubscribers[branch] = []chan *sharedpb.Message{}
+      case subscription := <-branchSubscribeChannel:
+        branch := subscription.branch
+        if subscribers[branch] == nil {
+          subscribers[branch] = []chan *sharedpb.Message{}
         }
-        branchSubscribers[branch] = append(branchSubscribers[branch], branchSubscription.responseChannel)
-        if branchStatuses[branch] != nil {
-          branchSubscription.responseChannel <- branchStatuses[branch]
+        subscribers[branch] = append(subscribers[branch], subscription.responseChannel)
+        if statuses[branch] != nil {
+          subscription.responseChannel <- statuses[branch]
         }
       case branchStatus := <-branchStatusChannel:
         branch := *branchStatus.Branch.Name
-        branchStatuses[branch] = branchStatus
-        for _, subscriber := range branchSubscribers[branch] {
+        statuses[branch] = branchStatus
+        for _, subscriber := range subscribers[branch] {
           subscriber <- branchStatus
         }
     }
