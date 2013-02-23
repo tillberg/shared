@@ -20,7 +20,7 @@ func ReadLines(id string, pipe io.Reader) {
 
 func Launch(id string, cachePath string, syncPath string, port string, setup TestSetup) {
     cmd := exec.Cmd{
-        Path: "shared",
+        Path: "../shared",
         Args: []string{"shared", "--watch", syncPath, "--cache", cachePath, "--port",  port},
     }
     stdout, err := cmd.StdoutPipe()
