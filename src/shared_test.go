@@ -8,14 +8,24 @@ import (
     "time"
 )
 
+func AssertContents(t *testing.T, timeout time.Duration, path string, contents string) {
+    start := time.Now()
+    for {
+        bytes, err := ioutil.ReadFile(path)
+        if err == nil && string(bytes) == contents {
+            return
+        }
+        if (time.Since(start) > timeout) {
+            t.Fatalf("%s failed to contain `%s`", path, contents)
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+}
+
 func TestBasic(t *testing.T) {
     setup := test.SetUp()
-    time.Sleep(500 * time.Millisecond)
     ioutil.WriteFile("/tmp/sync1/testfile", []byte{}, 0644)
-    time.Sleep(500 * time.Millisecond)
-    _, err := ioutil.ReadFile("/tmp/sync2/testfile")
-    if err != nil {
-        t.Fatal(err)
-    }
+    AssertContents(t, time.Second, "/tmp/sync2/testfile", "")
     test.TearDown(setup)
 }
