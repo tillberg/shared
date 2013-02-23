@@ -115,12 +115,6 @@ func (b *Blob) FirstParent(f func(*Blob) bool) *Blob {
   return nil
 }
 
-func (b *Blob) ShareRoot() *Blob {
-  return b.FirstParent(func(b *Blob) bool {
-    return b.IsShareRoot()
-  })
-}
-
 func (b *Blob) Root() *Blob {
   root := b.FirstParent(func(b *Blob) bool {
     return b.IsFile() || b.IsTree()
@@ -131,11 +125,8 @@ func (b *Blob) Root() *Blob {
   return root
 }
 
-func (b *Blob) IsShareRoot()   bool { return b.parent == nil }
 func (b *Blob) IsTree()        bool { return b.is_tree }
-func (b *Blob) IsTreeSegment() bool { return b.Root().IsTree() }
 func (b *Blob) IsFile()        bool { return b.is_file }
-func (b *Blob) IsFileSegment() bool { return b.Root().IsFile() }
 
 func calculateHash(bytes []byte) []byte {
   h := sha256.New()
