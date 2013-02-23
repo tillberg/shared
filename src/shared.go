@@ -23,8 +23,8 @@ var watch_target *string = flag.String("watch", "_sync", "The directory to sync"
 var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
 var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 
-type Request struct {
-  message         *sharedpb.Message
+type BlobRequest struct {
+  hash            []byte
   responseChannel chan *Blob
 }
 
@@ -34,7 +34,7 @@ type BranchSubscription struct {
 }
 
 var processChannel = make(chan FileEvent, 100) // debouncing
-var broadcastChannel = make(chan *Request, 10)
+var blobRequestChannel = make(chan BlobRequest, 10)
 var branchStatusChannel = make(chan *sharedpb.Message, 10)
 var subscribeChannel = make(chan chan *sharedpb.Message, 10)
 var objectReceiveChannel = make(chan *Blob, 100)
@@ -98,10 +98,7 @@ func GetBlob(hash Hash) *Blob {
     // and subscribing to object reception.  I think.  Maybe not.
     // Maybe we'll just make a duplicate network request.
     log.Printf("Requesting %s", GetShortHexString(hash))
-    broadcastChannel <- &Request{
-      message: &sharedpb.Message{HashRequest: hash},
-      responseChannel: responseChannel,
-    }
+    blobRequestChannel <- BlobRequest{hash: hash, responseChannel: responseChannel}
     blob = <-responseChannel
     log.Printf("Received %s", GetShortHexString(hash))
     blob.EnsureCached()
@@ -313,7 +310,8 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel ch
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
         name := "master"
-        branchStatusChannel <- &sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
+        message := sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
+        branchStatusChannel <- &message
         commit.root = newTree
       case newRemoteTreeHash := <-branchReceiveChannel:
         // blob := &Blob{hash: newRemoteTreeHash}
@@ -401,14 +399,14 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 }
 
 func BroadcastHandler() {
-  var subscribers []chan *sharedpb.Message
+  var blobRequestServicers []chan *sharedpb.Message
   objectSubscribers := map[string][]chan *Blob{}
   branchSubscribers := map[string][]chan *sharedpb.Message{}
   branchStatuses := map[string]*sharedpb.Message{}
   for {
     select {
       case subscriber := <-subscribeChannel:
-        subscribers = append(subscribers, subscriber)
+        blobRequestServicers = append(blobRequestServicers, subscriber)
       case branchSubscription := <-branchSubscribeChannel:
         branch := branchSubscription.branch
         if branchSubscribers[branch] == nil {
@@ -424,19 +422,16 @@ func BroadcastHandler() {
         for _, subscriber := range branchSubscribers[branch] {
           subscriber <- branchStatus
         }
-      case request := <-broadcastChannel:
-        for _, subscriber := range subscribers {
-          subscriber <- request.message
+      case blobRequest := <-blobRequestChannel:
+        for _, servicer := range blobRequestServicers {
+          servicer <- &sharedpb.Message{HashRequest: blobRequest.hash}
         }
-        m := request.message
-        if m.HashRequest != nil {
-          hash := GetHexString(m.HashRequest)
-          log.Printf("Waiting for %s", GetShortHexString(m.HashRequest))
-          if objectSubscribers[hash] == nil {
-            objectSubscribers[hash] = []chan *Blob{}
-          }
-          objectSubscribers[hash] = append(objectSubscribers[hash], request.responseChannel)
+        hashString := GetHexString(blobRequest.hash)
+        log.Printf("Waiting for %s", GetShortHexString(blobRequest.hash))
+        if objectSubscribers[hashString] == nil {
+          objectSubscribers[hashString] = []chan *Blob{}
         }
+        objectSubscribers[hashString] = append(objectSubscribers[hashString], blobRequest.responseChannel)
       case object := <-objectReceiveChannel:
         // log.Printf("Forwarding %s", GetHexString(object.Hash()))
         for _, subscriber := range objectSubscribers[GetHexString(object.Hash())] {
