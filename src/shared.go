@@ -5,6 +5,7 @@ import (
   "flag"
   "fmt"
   "os"
+  "os/signal"
   "log"
   "time"
   "path"
@@ -495,10 +496,15 @@ func connIncoming(conn *net.TCPConn) {
 }
 
 func makeConnection(remoteAddr *net.TCPAddr) {
+  start := time.Now()
   for {
     conn, err := net.DialTCP("tcp", nil, remoteAddr)
     if err != nil {
-      log.Fatal(err)
+      if time.Since(start) > time.Second {
+        log.Fatal(err)
+      }
+      time.Sleep(10 * time.Millisecond)
+      continue
     }
     log.Printf("Connected to %s.", remoteAddr)
     go connOutgoing(conn)
@@ -510,6 +516,17 @@ func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
   go connOutgoing(conn)
   connIncoming(conn)
+}
+
+func ListenForConnections(ln *net.TCPListener) {
+  for {
+    conn, err := ln.AcceptTCP()
+    if err != nil {
+      log.Print(err)
+      continue
+    }
+    go handleConnection(conn)
+  }
 }
 
 func main() {
@@ -534,6 +551,7 @@ func main() {
   if err != nil {
     log.Fatal(err)
   }
+  defer ln.Close()
   log.Printf("Listening on port %d.", *listen_port)
   // XXX omg kludge.  Need to figure out how to properly negotiate
   // unique full-duplex P2P connections.
@@ -544,12 +562,8 @@ func main() {
     }
     go makeConnection(remote_addr)
   }
-  for {
-    conn, err := ln.AcceptTCP()
-    if err != nil {
-      log.Print(err)
-      continue
-    }
-    go handleConnection(conn)
-  }
+  go ListenForConnections(ln)
+  interrupt := make(chan os.Signal, 2)
+  signal.Notify(interrupt, os.Interrupt)
+  <-interrupt
 }

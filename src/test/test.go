@@ -2,6 +2,7 @@
 package test
 
 import (
+    "os"
     "os/exec"
     "log"
     "fmt"
@@ -41,7 +42,7 @@ func Launch(id string, cachePath string, syncPath string, port string, setup Tes
     go ReadLines(id, stderr)
     setup.ready<-"ready"
     <-setup.quit
-    cmd.Process.Kill()
+    cmd.Process.Signal(os.Interrupt)
     cmd.Wait()
     setup.ready<-"exited"
 }
@@ -52,7 +53,6 @@ type TestSetup struct {
 }
 
 func SetUp() *TestSetup {
-    exec.Command("/usr/bin/go", "build", "src/shared.go")
     exec.Command("rm", "-rf", "/tmp/sync1").Run()
     exec.Command("mkdir", "/tmp/sync1").Run()
     exec.Command("rm", "-rf", "/tmp/sync2").Run()
