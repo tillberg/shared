@@ -1,5 +1,5 @@
 
-package main
+package test
 
 import (
     "os/exec"
@@ -7,8 +7,6 @@ import (
     "fmt"
     "io"
     "bufio"
-    "io/ioutil"
-    "time"
 )
 
 func ReadLines(id string, pipe io.Reader) {
@@ -20,7 +18,7 @@ func ReadLines(id string, pipe io.Reader) {
     }
 }
 
-func Launch(id string, cachePath string, syncPath string, port string, ready chan string, quit chan string) {
+func Launch(id string, cachePath string, syncPath string, port string, setup TestSetup) {
     cmd := exec.Cmd{
         Path: "shared",
         Args: []string{"shared", "--watch", syncPath, "--cache", cachePath, "--port",  port},
@@ -41,35 +39,41 @@ func Launch(id string, cachePath string, syncPath string, port string, ready cha
     }
     go ReadLines(id, stdout)
     go ReadLines(id, stderr)
-    ready<-"ready"
-    <-quit
+    setup.ready<-"ready"
+    <-setup.quit
     cmd.Process.Kill()
     cmd.Wait()
-    ready<-"exited"
+    setup.ready<-"exited"
 }
 
-func main() {
+type TestSetup struct {
+    ready chan string
+    quit chan string
+}
+
+func SetUp() *TestSetup {
     exec.Command("/usr/bin/go", "build", "src/shared.go")
     exec.Command("rm", "-rf", "/tmp/sync1").Run()
     exec.Command("mkdir", "/tmp/sync1").Run()
     exec.Command("rm", "-rf", "/tmp/sync2").Run()
     exec.Command("mkdir", "/tmp/sync2").Run()
 
-    ready := make(chan string)
-    quit := make(chan string)
-    go Launch("A", "/tmp/cache1", "/tmp/sync1", "9251", ready, quit)
-    <-ready
-    go Launch("B", "/tmp/cache2", "/tmp/sync2", "9252", ready, quit)
-    <-ready
-    time.Sleep(500 * time.Millisecond)
-    ioutil.WriteFile("/tmp/sync1/testfile", []byte{}, 0644)
-    time.Sleep(500 * time.Millisecond)
-    quit<-"quit"
-    quit<-"quit"
-    <-ready
-    <-ready
-    _, err := ioutil.ReadFile("/tmp/sync2/testfile")
-    if err != nil {
-        log.Fatal(err)
-    }
+    setup := TestSetup{ready: make(chan string), quit: make(chan string)}
+    go Launch("A", "/tmp/cache1", "/tmp/sync1", "9251", setup)
+    <-setup.ready
+    go Launch("B", "/tmp/cache2", "/tmp/sync2", "9252", setup)
+    <-setup.ready
+    return &setup
 }
+
+
+func TearDown(setup *TestSetup) {
+    setup.quit<-"quit"
+    setup.quit<-"quit"
+    <-setup.ready
+    <-setup.ready
+}
+
+func init() {
+}
+
