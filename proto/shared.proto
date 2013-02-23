@@ -4,6 +4,7 @@ message Message {
   optional bytes HashRequest = 1;
   optional Object Object = 2;
   optional Branch Branch = 9;
+  optional string SubscribeBranch = 10;
 }
 
 message Object {

@@ -28,11 +28,18 @@ type Request struct {
   responseChannel chan *Blob
 }
 
+type BranchSubscription struct {
+  branch          string
+  responseChannel chan *sharedpb.Message
+}
+
 var processChannel = make(chan FileEvent, 100) // debouncing
 var broadcastChannel = make(chan *Request, 10)
+var branchStatusChannel = make(chan *sharedpb.Message, 10)
 var subscribeChannel = make(chan chan *sharedpb.Message, 10)
 var objectReceiveChannel = make(chan *Blob, 100)
 var branchReceiveChannel = make(chan []byte, 10)
+var branchSubscribeChannel = make(chan *BranchSubscription, 10)
 
 type Hash []byte
 
@@ -306,9 +313,7 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel ch
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
         name := "master"
-        broadcastChannel <- &Request{
-          message: &sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}},
-        }
+        branchStatusChannel <- &sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
         commit.root = newTree
       case newRemoteTreeHash := <-branchReceiveChannel:
         // blob := &Blob{hash: newRemoteTreeHash}
@@ -398,17 +403,35 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
 func BroadcastHandler() {
   var subscribers []chan *sharedpb.Message
   objectSubscribers := map[string][]chan *Blob{}
+  branchSubscribers := map[string][]chan *sharedpb.Message{}
+  branchStatuses := map[string]*sharedpb.Message{}
   for {
     select {
       case subscriber := <-subscribeChannel:
         subscribers = append(subscribers, subscriber)
+      case branchSubscription := <-branchSubscribeChannel:
+        branch := branchSubscription.branch
+        if branchSubscribers[branch] == nil {
+          branchSubscribers[branch] = []chan *sharedpb.Message{}
+        }
+        branchSubscribers[branch] = append(branchSubscribers[branch], branchSubscription.responseChannel)
+        if branchStatuses[branch] != nil {
+          branchSubscription.responseChannel <- branchStatuses[branch]
+        }
+      case branchStatus := <-branchStatusChannel:
+        branch := *branchStatus.Branch.Name
+        branchStatuses[branch] = branchStatus
+        for _, subscriber := range branchSubscribers[branch] {
+          subscriber <- branchStatus
+        }
       case request := <-broadcastChannel:
         for _, subscriber := range subscribers {
           subscriber <- request.message
         }
-        if request.message.HashRequest != nil {
-          hash := GetHexString(request.message.HashRequest)
-          log.Printf("Waiting for %s", GetShortHexString(request.message.HashRequest))
+        m := request.message
+        if m.HashRequest != nil {
+          hash := GetHexString(m.HashRequest)
+          log.Printf("Waiting for %s", GetShortHexString(m.HashRequest))
           if objectSubscribers[hash] == nil {
             objectSubscribers[hash] = []chan *Blob{}
           }
@@ -423,11 +446,9 @@ func BroadcastHandler() {
   }
 }
 
-func SendObject(hash Hash) {
+func SendObject(hash Hash, dest chan *sharedpb.Message) {
   blob := GetBlob(hash)
-  broadcastChannel <- &Request{
-    message: &sharedpb.Message{Object: &sharedpb.Object{Hash: blob.Hash(), Object: blob.Bytes()}},
-  }
+  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: blob.Hash(), Object: blob.Bytes()}}
 }
 
 func MessageString(m *sharedpb.Message) string {
@@ -437,16 +458,19 @@ func MessageString(m *sharedpb.Message) string {
     return fmt.Sprintf("{Branch: %s -> %s}", *m.Branch.Name, GetShortHexString(m.Branch.Hash))
   } else if m.Object != nil {
     return fmt.Sprintf("{Object: %s -> %d bytes}", GetShortHexString(m.Object.Hash), len(m.Object.Object))
+  } else if m.SubscribeBranch != nil {
+    return fmt.Sprintf("{Subscribe: %s}", *m.SubscribeBranch)
   }
   log.Fatal("Unknown message: ", m)
   return ""
 }
 
-func connOutgoing(conn *net.TCPConn) {
-  subscription := make(chan *sharedpb.Message, 10)
-  subscribeChannel <- subscription
+func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
+  s := "master"
+  outbox<-&sharedpb.Message{SubscribeBranch: &s}
+  subscribeChannel <- outbox
   for {
-    message := <- subscription
+    message := <- outbox
       marshaled, err := proto.Marshal(message)
       if err != nil {
         log.Fatal(err)
@@ -465,7 +489,7 @@ func connOutgoing(conn *net.TCPConn) {
   }
 }
 
-func connIncoming(conn *net.TCPConn) {
+func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   for {
     reader := bufio.NewReader(conn)
     msg_size, err := binary.ReadUvarint(reader)
@@ -484,7 +508,7 @@ func connIncoming(conn *net.TCPConn) {
     }
     log.Printf("Received %d bytes: %s", num, MessageString(message))
     if message.HashRequest != nil {
-      go SendObject(message.HashRequest)
+      go SendObject(message.HashRequest, outbox)
     }
     if message.Object != nil {
       objectReceiveChannel <- MakeFileBlobFromBytes(message.Object.Object)
@@ -492,7 +516,16 @@ func connIncoming(conn *net.TCPConn) {
     if message.Branch != nil {
       branchReceiveChannel <- message.Branch.Hash
     }
+    if message.SubscribeBranch != nil {
+      branchSubscribeChannel <- &BranchSubscription{*message.SubscribeBranch, outbox}
+    }
   }
+}
+
+func startConnections(conn *net.TCPConn) {
+  outbox := make(chan *sharedpb.Message, 10)
+  go connOutgoing(conn, outbox)
+  connIncoming(conn, outbox)
 }
 
 func makeConnection(remoteAddr *net.TCPAddr) {
@@ -507,15 +540,13 @@ func makeConnection(remoteAddr *net.TCPAddr) {
       continue
     }
     log.Printf("Connected to %s.", remoteAddr)
-    go connOutgoing(conn)
-    connIncoming(conn)
+    startConnections(conn)
   }
 }
 
 func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
-  go connOutgoing(conn)
-  connIncoming(conn)
+  startConnections(conn)
 }
 
 func ListenForConnections(ln *net.TCPListener) {
