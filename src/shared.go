@@ -398,30 +398,13 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
   writer.Write(buf[:numBytes])
 }
 
-func BroadcastHandler() {
+func ArbitBlobRequests() {
   var blobRequestServicers []chan *sharedpb.Message
   objectSubscribers := map[string][]chan *Blob{}
-  branchSubscribers := map[string][]chan *sharedpb.Message{}
-  branchStatuses := map[string]*sharedpb.Message{}
   for {
     select {
       case subscriber := <-subscribeChannel:
         blobRequestServicers = append(blobRequestServicers, subscriber)
-      case branchSubscription := <-branchSubscribeChannel:
-        branch := branchSubscription.branch
-        if branchSubscribers[branch] == nil {
-          branchSubscribers[branch] = []chan *sharedpb.Message{}
-        }
-        branchSubscribers[branch] = append(branchSubscribers[branch], branchSubscription.responseChannel)
-        if branchStatuses[branch] != nil {
-          branchSubscription.responseChannel <- branchStatuses[branch]
-        }
-      case branchStatus := <-branchStatusChannel:
-        branch := *branchStatus.Branch.Name
-        branchStatuses[branch] = branchStatus
-        for _, subscriber := range branchSubscribers[branch] {
-          subscriber <- branchStatus
-        }
       case blobRequest := <-blobRequestChannel:
         for _, servicer := range blobRequestServicers {
           servicer <- &sharedpb.Message{HashRequest: blobRequest.hash}
@@ -436,6 +419,30 @@ func BroadcastHandler() {
         // log.Printf("Forwarding %s", GetHexString(object.Hash()))
         for _, subscriber := range objectSubscribers[GetHexString(object.Hash())] {
           subscriber <- object
+        }
+    }
+  }
+}
+
+func ArbitBranchStatus() {
+  branchSubscribers := map[string][]chan *sharedpb.Message{}
+  branchStatuses := map[string]*sharedpb.Message{}
+  for {
+    select {
+      case branchSubscription := <-branchSubscribeChannel:
+        branch := branchSubscription.branch
+        if branchSubscribers[branch] == nil {
+          branchSubscribers[branch] = []chan *sharedpb.Message{}
+        }
+        branchSubscribers[branch] = append(branchSubscribers[branch], branchSubscription.responseChannel)
+        if branchStatuses[branch] != nil {
+          branchSubscription.responseChannel <- branchStatuses[branch]
+        }
+      case branchStatus := <-branchStatusChannel:
+        branch := *branchStatus.Branch.Name
+        branchStatuses[branch] = branchStatus
+        for _, subscriber := range branchSubscribers[branch] {
+          subscriber <- branchStatus
         }
     }
   }
@@ -571,7 +578,8 @@ func main() {
     go processChange(processImmChannel)
   }
   go debounce(processImmChannel, processChannel)
-  go BroadcastHandler()
+  go ArbitBranchStatus()
+  go ArbitBlobRequests()
 
   MakeBranch(*watch_target, nil, nil)
 
