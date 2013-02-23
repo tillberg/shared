@@ -46,24 +46,6 @@ type Hash []byte
 type Blob struct {
   bytes  []byte
   hash   Hash
-
-  // non-empty for non-leaf files and trees:
-  // segments []*Blob
-
-  // Channel to communicate with map of children
-  childrenChannel chan string
-
-  // Channel to send self-updates to.  This maybe should move to
-  // a more flexible pub/sub type deal in the future.
-  revisionChannel chan *Blob
-
-  // non-nil for everything except share roots:
-  parent *Blob
-
-  is_tree bool
-  is_file bool
-
-  // XXX for tree entries: mode flags
 }
 
 type Commit struct {
@@ -105,28 +87,6 @@ func GetBlob(hash Hash) *Blob {
   }
   return blob
 }
-
-func (b *Blob) FirstParent(f func(*Blob) bool) *Blob {
-  for p := b.parent; p != nil; p = p.parent {
-    if f(p) {
-      return p
-    }
-  }
-  return nil
-}
-
-func (b *Blob) Root() *Blob {
-  root := b.FirstParent(func(b *Blob) bool {
-    return b.IsFile() || b.IsTree()
-  })
-  if root == nil {
-    panic("Blob has no root")
-  }
-  return root
-}
-
-func (b *Blob) IsTree()        bool { return b.is_tree }
-func (b *Blob) IsFile()        bool { return b.is_file }
 
 func calculateHash(bytes []byte) []byte {
   h := sha256.New()
@@ -182,15 +142,15 @@ func (blob *Blob) EnsureCached() {
 }
 
 func MakeEmptyFileBlob() *Blob {
-  return &Blob{is_tree: false, is_file: true}
+  return &Blob{}
 }
 
 func MakeFileBlobFromHash(hash Hash) *Blob {
-  return &Blob{hash: hash, is_tree: false, is_file: true}
+  return &Blob{hash: hash}
 }
 
 func MakeFileBlobFromBytes(bytes []byte) *Blob {
-  return &Blob{bytes: bytes, is_tree: false, is_file: true}
+  return &Blob{bytes: bytes}
 }
 
 func WatchTree(watchPath string, resultChannel chan FileUpdate) {
@@ -214,7 +174,7 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   }
 }
 
-func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
+func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash, revisionChannel chan *Blob) {
   // XXX ideally, this would be a B-Tree with distributed caching
   var children = map[string]*Blob{}
   updateSelf := func() {
@@ -233,7 +193,7 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
     tree.bytes, _ = proto.Marshal(&pbtree)
     tree.hash = nil
     tree.EnsureCached()
-    tree.revisionChannel <- tree
+    revisionChannel <- tree
   }
   unpackSelf := func() {
     pbtree := &sharedpb.Tree{}
@@ -276,21 +236,14 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash) {
         tree.hash = blob.Hash()
         log.Printf("Merging %s into tree (%d bytes)", blob.ShortHashString(), len(tree.bytes))
         unpackSelf()
-      // case lookup := <- tree.childrenChannel:
     }
   }
 }
 
-func MakeTreeBlob(path string, parent *Blob, revisionChannel chan *Blob, mergeChannel chan Hash) *Blob {
-  me := Blob{
-    parent: parent,
-    is_tree: true,
-    is_file: false,
-    childrenChannel: make(chan string, 10),
-    revisionChannel: revisionChannel,
-  }
+func MakeTreeBlob(path string, revisionChannel chan *Blob, mergeChannel chan Hash) *Blob {
+  me := Blob{}
   resultChannel := make(chan FileUpdate, 10)
-  go me.MonitorTree(resultChannel, mergeChannel)
+  go me.MonitorTree(resultChannel, mergeChannel, revisionChannel)
   go WatchTree(path, resultChannel)
   return &me
 }
@@ -316,7 +269,7 @@ func MakeBranch(path string, previous *Commit, root *Blob) *Commit {
   revisionChannel := make(chan *Blob, 10)
   mergeChannel := make(chan Hash, 10)
   if root == nil {
-    root = MakeTreeBlob(path, nil, revisionChannel, mergeChannel)
+    root = MakeTreeBlob(path, revisionChannel, mergeChannel)
   }
   me := Commit{
     root: root,
