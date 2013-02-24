@@ -1,7 +1,6 @@
 package main
 
 import (
-  "encoding/binary"
   "flag"
   "fmt"
   "os"
@@ -11,7 +10,6 @@ import (
   "path"
   "net"
   "bufio"
-  "io"
   "crypto/sha256"
   "io/ioutil"
   "github.com/howeyc/fsnotify"
@@ -423,22 +421,8 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
 func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   reader := bufio.NewReader(conn)
   for {
-    preambleSize, err := binary.ReadUvarint(reader)
+    _, message, err := network.ReceiveMessage(reader)
     check(err)
-    bufPreamble := make([]byte, preambleSize)
-    _, err = io.ReadFull(reader, bufPreamble)
-    check(err)
-    preamble := &sharedpb.Preamble{}
-    err = proto.Unmarshal(bufPreamble, preamble)
-    check(err)
-
-    bufMessage := make([]byte, *preamble.Length)
-    _, err = io.ReadFull(reader, bufMessage)
-    check(err)
-    message := &sharedpb.Message{}
-    err = proto.Unmarshal(bufMessage, message)
-    check(err)
-
     log.Printf("Received %s", MessageString(message))
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)

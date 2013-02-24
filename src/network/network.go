@@ -4,6 +4,7 @@ package network;
 import (
   "encoding/binary"
   "bufio"
+  "io"
   "time"
   "code.google.com/p/goprotobuf/proto"
   "../sharedpb"
@@ -31,4 +32,24 @@ func SendMessage(message *sharedpb.Message, writer *bufio.Writer) error {
   if err != nil { return err }
   writer.Flush()
   return nil
+}
+
+func ReceiveMessage(reader *bufio.Reader) (*sharedpb.Preamble, *sharedpb.Message, error) {
+  preambleSize, err := binary.ReadUvarint(reader)
+  if err != nil { return nil, nil, err }
+  bufPreamble := make([]byte, preambleSize)
+  _, err = io.ReadFull(reader, bufPreamble)
+  if err != nil { return nil, nil, err }
+  preamble := &sharedpb.Preamble{}
+  err = proto.Unmarshal(bufPreamble, preamble)
+  if err != nil { return nil, nil, err }
+
+  bufMessage := make([]byte, *preamble.Length)
+  _, err = io.ReadFull(reader, bufMessage)
+  if err != nil { return nil, nil, err }
+  message := &sharedpb.Message{}
+  err = proto.Unmarshal(bufMessage, message)
+  if err != nil { return nil, nil, err }
+
+  return preamble, message, nil
 }
