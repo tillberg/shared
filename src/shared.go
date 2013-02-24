@@ -156,7 +156,10 @@ func MakeFileBlobFromBytes(bytes []byte) *Blob {
 func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   watcher, _ := fsnotify.NewWatcher()
   watcher.Watch(watchPath)
-  var files, _ = ioutil.ReadDir(watchPath)
+  files, err := ioutil.ReadDir(watchPath)
+  if err != nil {
+    log.Fatal(err)
+  }
   for _, file := range files {
     processChannel <- FileEvent{path.Join(watchPath, file.Name()), resultChannel}
   }

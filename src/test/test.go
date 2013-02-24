@@ -57,12 +57,14 @@ func CleanDir(path string) {
     exec.Command("/bin/mkdir", path).Run()
 }
 
-func SetUp() *TestSetup {
+func Cleanup() {
     CleanDir("/tmp/cache1")
     CleanDir("/tmp/cache2")
     CleanDir("/tmp/sync1")
     CleanDir("/tmp/sync2")
+}
 
+func Start() *TestSetup {
     setup := TestSetup{ready: make(chan string), quit: make(chan string)}
     go Launch("A", "/tmp/cache1", "/tmp/sync1", "9251", setup)
     <-setup.ready
@@ -71,6 +73,10 @@ func SetUp() *TestSetup {
     return &setup
 }
 
+func SetUp() *TestSetup {
+    Cleanup()
+    return Start()
+}
 
 func TearDown(setup *TestSetup) {
     setup.quit<-"quit"

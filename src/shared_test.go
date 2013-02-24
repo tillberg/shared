@@ -44,3 +44,13 @@ func TestTwo(t* testing.T) {
     AssertContents(t, time.Second, "/tmp/sync2/testfile", "hello")
     AssertContents(t, time.Second, "/tmp/sync2/testfile2", "hello to you")
 }
+
+func TestTwoBefore(t* testing.T) {
+    test.Cleanup()
+    ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
+    ioutil.WriteFile("/tmp/sync1/testfile2", []byte("hello to you"), 0644)
+    setup := test.Start()
+    defer test.TearDown(setup)
+    AssertContents(t, time.Second, "/tmp/sync2/testfile", "hello")
+    AssertContents(t, time.Second, "/tmp/sync2/testfile2", "hello to you")
+}
