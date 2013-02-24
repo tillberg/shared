@@ -17,7 +17,14 @@ import (
   "github.com/howeyc/fsnotify"
   "code.google.com/p/goprotobuf/proto"
   "./sharedpb"
+  "github.com/tillberg/goconfig/conf"
 )
+
+func check(err interface{}) {
+  if err != nil {
+    log.Fatal(err)
+  }
+}
 
 var watch_target *string = flag.String("watch", "_sync", "The directory to sync")
 var cache_root *string = flag.String("cache", "_cache", "Directory to keep cache of objects")
@@ -110,9 +117,7 @@ func (blob *Blob) Bytes() []byte {
       log.Fatal("hash is nil")
     }
     bytes, err := ioutil.ReadFile(GetCachePath(hash))
-    if err != nil {
-      log.Fatal(err)
-    }
+    check(err)
     blob.bytes = bytes
   }
   return blob.bytes
@@ -157,9 +162,7 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   watcher, _ := fsnotify.NewWatcher()
   watcher.Watch(watchPath)
   files, err := ioutil.ReadDir(watchPath)
-  if err != nil {
-    log.Fatal(err)
-  }
+  check(err)
   for _, file := range files {
     processChannel <- FileEvent{path.Join(watchPath, file.Name()), resultChannel}
   }
@@ -201,9 +204,7 @@ func (tree *Blob) MonitorTree(input chan FileUpdate, mergeChannel chan Hash, rev
   unpackSelf := func() {
     pbtree := &sharedpb.Tree{}
     err := proto.Unmarshal(tree.bytes, pbtree)
-    if err != nil {
-      log.Fatal(err)
-    }
+    check(err)
     children = map[string]*Blob{}
     log.Printf("Unpacking %d entries", len(pbtree.Entries))
     for _, entry := range pbtree.Entries {
@@ -307,14 +308,11 @@ func processChange(inputChannel chan FileEvent) {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
       bytes, err := ioutil.ReadFile(event.path)
-      if err != nil {
-        log.Printf("Error reading `%s`: %s", event.path, err);
-      } else {
-        blob := MakeFileBlobFromBytes(bytes)
-        blob.EnsureCached()
-        // Send the update back to the tree's result channel
-        event.resultChannel <- FileUpdate{blob, event.path, true, statbuf.Size()}
-      }
+      check(err)
+      blob := MakeFileBlobFromBytes(bytes)
+      blob.EnsureCached()
+      // Send the update back to the tree's result channel
+      event.resultChannel <- FileUpdate{blob, event.path, true, statbuf.Size()}
     }
   }
 }
@@ -421,19 +419,20 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
-      marshaled, err := proto.Marshal(message)
-      if err != nil {
-        log.Fatal(err)
-      }
-      WriteUvarint(writer, uint64(len(marshaled)))
-      num, err := writer.Write(marshaled)
-      if err != nil {
-        log.Fatal(err)
-      }
-      if len(marshaled) != num {
-        log.Fatal("Sent %d bytes when I needed to send %d", num, len(marshaled))
-      }
-      log.Printf("Sent %d bytes: %s", num, MessageString(message))
+      now := uint64(time.Now().Unix())
+      message.Timestamp = &now
+      messageBytes, err := proto.Marshal(message)
+      check(err)
+      numMessageBytes := uint64(len(messageBytes))
+      preamble := &sharedpb.Preamble{Length: &numMessageBytes}
+      preambleBytes, err := proto.Marshal(preamble)
+      check(err)
+      WriteUvarint(writer, uint64(len(preambleBytes)))
+      _, err = writer.Write(preambleBytes)
+      check(err)
+      _, err = writer.Write(messageBytes)
+      check(err)
+      log.Printf("Sent %s", MessageString(message))
       writer.Flush()
   }
 }
@@ -441,21 +440,23 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
 func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   reader := bufio.NewReader(conn)
   for {
-    msg_size, err := binary.ReadUvarint(reader)
-    if err != nil {
-      log.Fatal(err)
-    }
-    buf := make([]byte, msg_size)
-    num, err := io.ReadFull(reader, buf)
-    if err != nil {
-      log.Fatal(err)
-    }
+    preambleSize, err := binary.ReadUvarint(reader)
+    check(err)
+    bufPreamble := make([]byte, preambleSize)
+    _, err = io.ReadFull(reader, bufPreamble)
+    check(err)
+    preamble := &sharedpb.Preamble{}
+    err = proto.Unmarshal(bufPreamble, preamble)
+    check(err)
+
+    bufMessage := make([]byte, *preamble.Length)
+    _, err = io.ReadFull(reader, bufMessage)
+    check(err)
     message := &sharedpb.Message{}
-    err = proto.Unmarshal(buf, message)
-    if err != nil {
-      log.Fatal(err)
-    }
-    log.Printf("Received %d bytes: %s", num, MessageString(message))
+    err = proto.Unmarshal(bufMessage, message)
+    check(err)
+
+    log.Printf("Received %s", MessageString(message))
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
@@ -518,6 +519,11 @@ func restartOnChange() {
 func main() {
   flag.Parse()
   log.SetFlags(log.Ltime | log.Lshortfile)
+  config, err := conf.ReadConfigFile("shared.ini")
+  check(err)
+  apikey, err := config.GetString("main", "apikey")
+  check(err)
+  log.Print(apikey)
   go restartOnChange()
   var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
@@ -531,22 +537,16 @@ func main() {
   MakeBranch(*watch_target, nil, nil)
 
   listen_addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", *listen_port));
-  if err != nil {
-    log.Fatal(err)
-  }
+  check(err)
   ln, err := net.ListenTCP("tcp", listen_addr)
-  if err != nil {
-    log.Fatal(err)
-  }
+  check(err)
   defer ln.Close()
   log.Printf("Listening on port %d.", *listen_port)
   // XXX omg kludge.  Need to figure out how to properly negotiate
   // unique full-duplex P2P connections.
   if *listen_port == 9252 {
     remote_addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:9251");
-    if err != nil {
-      log.Fatal(err)
-    }
+    check(err)
     go makeConnection(remote_addr)
   }
   go ListenForConnections(ln)

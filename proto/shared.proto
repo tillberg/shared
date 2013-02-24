@@ -1,8 +1,14 @@
 package sharedpb;
 
+message Preamble {
+  required uint64 Length = 1;
+  optional bytes Hash = 2;
+}
+
 message Message {
-  optional bytes HashRequest = 1;
-  optional Object Object = 2;
+  required uint64 Timestamp = 1;
+  optional bytes HashRequest = 7;
+  optional Object Object = 8;
   optional Branch Branch = 9;
   optional string SubscribeBranch = 10;
 }

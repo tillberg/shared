@@ -26,3 +26,4 @@ _testmain.go
 /_cache*
 /src/sharedpb
 /shared
+shared.ini
