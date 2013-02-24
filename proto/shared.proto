@@ -11,6 +11,8 @@ message Message {
   optional Object Object = 8;
   optional Branch Branch = 9;
   optional string SubscribeBranch = 10;
+
+  repeated string AddRemote = 100;
 }
 
 message Object {

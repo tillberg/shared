@@ -17,6 +17,7 @@ import (
   "github.com/howeyc/fsnotify"
   "code.google.com/p/goprotobuf/proto"
   "./sharedpb"
+  "./network"
   "github.com/tillberg/goconfig/conf"
 )
 
@@ -337,12 +338,6 @@ func debounce(output chan FileEvent, input chan FileEvent) {
   }
 }
 
-func WriteUvarint(writer *bufio.Writer, number uint64) {
-  buf := make([]byte, 8)
-  numBytes := binary.PutUvarint(buf, number)
-  writer.Write(buf[:numBytes])
-}
-
 func ArbitBlobRequests() {
   servicers := []chan *sharedpb.Message{}
   subscribers := map[string][]chan *Blob{}
@@ -419,21 +414,9 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
-      now := uint64(time.Now().Unix())
-      message.Timestamp = &now
-      messageBytes, err := proto.Marshal(message)
-      check(err)
-      numMessageBytes := uint64(len(messageBytes))
-      preamble := &sharedpb.Preamble{Length: &numMessageBytes}
-      preambleBytes, err := proto.Marshal(preamble)
-      check(err)
-      WriteUvarint(writer, uint64(len(preambleBytes)))
-      _, err = writer.Write(preambleBytes)
-      check(err)
-      _, err = writer.Write(messageBytes)
-      check(err)
-      log.Printf("Sent %s", MessageString(message))
-      writer.Flush()
+    err := network.SendMessage(message, writer)
+    check(err)
+    log.Printf("Sent %s", MessageString(message))
   }
 }
 
@@ -521,9 +504,8 @@ func main() {
   log.SetFlags(log.Ltime | log.Lshortfile)
   config, err := conf.ReadConfigFile("shared.ini")
   check(err)
-  apikey, err := config.GetString("main", "apikey")
+  _, err = config.GetString("main", "apikey")
   check(err)
-  log.Print(apikey)
   go restartOnChange()
   var processImmChannel = make(chan FileEvent, 100)
   var WORKER_COUNT = 1
