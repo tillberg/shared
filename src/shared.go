@@ -405,24 +405,27 @@ func MessageString(m *sharedpb.Message) string {
   return ""
 }
 
-func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
+func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey string) {
   s := "master"
   outbox<-&sharedpb.Message{SubscribeBranch: &s}
   subscribeChannel <- outbox
   writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
-    err := network.SendMessage(message, writer)
+    err := network.SendSignedMessage(message, writer, apikey)
     check(err)
     log.Printf("Sent %s", MessageString(message))
   }
 }
 
-func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
+func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey string) {
   reader := bufio.NewReader(conn)
   for {
-    _, message, err := network.ReceiveMessage(reader)
+    message, valid, err := network.ReceiveMessage(reader, apikey)
     check(err)
+    if !valid {
+      log.Fatal("Invalid message received")
+    }
     log.Printf("Received %s", MessageString(message))
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
@@ -438,13 +441,13 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   }
 }
 
-func startConnections(conn *net.TCPConn) {
+func startConnections(conn *net.TCPConn, apikey string) {
   outbox := make(chan *sharedpb.Message, 10)
-  go connOutgoing(conn, outbox)
-  connIncoming(conn, outbox)
+  go connOutgoing(conn, outbox, apikey)
+  connIncoming(conn, outbox, apikey)
 }
 
-func makeConnection(remoteAddr *net.TCPAddr) {
+func makeConnection(remoteAddr *net.TCPAddr, apikey string) {
   start := time.Now()
   for {
     conn, err := net.DialTCP("tcp", nil, remoteAddr)
@@ -456,23 +459,23 @@ func makeConnection(remoteAddr *net.TCPAddr) {
       continue
     }
     log.Printf("Connected to %s.", remoteAddr)
-    startConnections(conn)
+    startConnections(conn, apikey)
   }
 }
 
-func handleConnection(conn *net.TCPConn) {
+func handleConnection(conn *net.TCPConn, apikey string) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
-  startConnections(conn)
+  startConnections(conn, apikey)
 }
 
-func ListenForConnections(ln *net.TCPListener) {
+func ListenForConnections(ln *net.TCPListener, apikey string) {
   for {
     conn, err := ln.AcceptTCP()
     if err != nil {
       log.Print(err)
       continue
     }
-    go handleConnection(conn)
+    go handleConnection(conn, apikey)
   }
 }
 
@@ -488,7 +491,7 @@ func main() {
   log.SetFlags(log.Ltime | log.Lshortfile)
   config, err := conf.ReadConfigFile("shared.ini")
   check(err)
-  _, err = config.GetString("main", "apikey")
+  apikey, err := config.GetString("main", "apikey")
   check(err)
   go restartOnChange()
   var processImmChannel = make(chan FileEvent, 100)
@@ -513,9 +516,9 @@ func main() {
   if *listen_port == 9252 {
     remote_addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:9251");
     check(err)
-    go makeConnection(remote_addr)
+    go makeConnection(remote_addr, apikey)
   }
-  go ListenForConnections(ln)
+  go ListenForConnections(ln, apikey)
   interrupt := make(chan os.Signal, 2)
   signal.Notify(interrupt, os.Interrupt)
   <-interrupt

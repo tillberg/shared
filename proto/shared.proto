@@ -2,7 +2,7 @@ package sharedpb;
 
 message Preamble {
   required uint64 Length = 1;
-  optional bytes Hash = 2;
+  optional bytes Signature = 2;
 }
 
 message Message {
