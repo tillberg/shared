@@ -19,7 +19,7 @@ func ReadLines(id string, pipe io.Reader) {
     }
 }
 
-func Launch(id string, cachePath string, syncPath string, port string, setup TestSetup) {
+func Launch(id string, cachePath string, syncPath string, port string, setup *TestSetup) {
     cmd := exec.Cmd{
         Path: "../shared",
         Args: []string{"shared", "--watch", syncPath, "--cache", cachePath, "--port",  port},
@@ -64,13 +64,25 @@ func Cleanup() {
     CleanDir("/tmp/sync2")
 }
 
-func Start() *TestSetup {
-    setup := TestSetup{ready: make(chan string), quit: make(chan string)}
+func Init() *TestSetup {
+    return &TestSetup{ready: make(chan string), quit: make(chan string)}
+}
+
+func StartA(setup *TestSetup) {
     go Launch("A", "/tmp/cache1", "/tmp/sync1", "9251", setup)
     <-setup.ready
+}
+
+func StartB(setup *TestSetup) {
     go Launch("B", "/tmp/cache2", "/tmp/sync2", "9252", setup)
     <-setup.ready
-    return &setup
+}
+
+func Start() *TestSetup {
+    setup := Init()
+    StartA(setup)
+    StartB(setup)
+    return setup
 }
 
 func SetUp() *TestSetup {
