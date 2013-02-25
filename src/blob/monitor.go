@@ -2,6 +2,7 @@
 package blob
 
 import (
+  "bytes"
   "io/ioutil"
   "log"
   "os"
@@ -162,13 +163,13 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel ch
       case newTree := <-revisionChannel:
         log.Printf("New branch revision: %s", newTree.ShortHashString())
         name := "master"
-        // message := sharedpb.Message{Branch: &sharedpb.Branch{Name: &name, Hash: newTree.Hash()}}
         types.BranchUpdateChannel <- types.BranchStatus{Name: name, Hash: newTree.Hash()}
         commit.root = newTree
       case newBranchStatus := <-branchReceiveChannel:
-        // blob := &Blob{hash: newRemoteTreeHash}
-        // log.Printf("New remote revision: %s", GetShortHexString(newRemoteTreeHash[:8]))
-        mergeChannel <- newBranchStatus.Hash
+        if !bytes.Equal(commit.root.Hash(), newBranchStatus.Hash) {
+          // log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
+          mergeChannel <- newBranchStatus.Hash
+        }
     }
   }
 }

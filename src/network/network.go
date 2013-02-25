@@ -99,8 +99,10 @@ func ReceiveMessage(reader *bufio.Reader, apikey string) (*sharedpb.Message, boo
 }
 
 func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey string) {
-  writer := bufio.NewWriter(conn)
+  s := "master"
+  outbox<-&sharedpb.Message{SubscribeBranch: &s}
   types.BlobServicerChannel <- outbox
+  writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
     err := SendSignedMessage(message, writer, apikey)
@@ -135,7 +137,7 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey strin
       types.BlobReceiveChannel <- message.Object.Object
     } else if message.Branch != nil {
       branchUpdate := types.BranchStatus{Name: *message.Branch.Name, Hash:message.Branch.Hash}
-      types.BranchReceiveChannel <- branchUpdate
+      types.BranchUpdateChannel <- branchUpdate
     } else if message.SubscribeBranch != nil {
       go SubscribeToBranch(*message.SubscribeBranch, outbox)
     } else {
