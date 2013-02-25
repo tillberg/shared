@@ -92,10 +92,9 @@ func main() {
   flag.Parse()
   log.SetFlags(log.Ltime | log.Lshortfile)
   blob.CacheRoot = *cache_root
-  config, err := conf.ReadConfigFile("shared.ini")
+  _, err := conf.ReadConfigFile("shared.ini")
   check(err)
-  apikey, err := config.GetString("main", "apikey")
-  check(err)
+
   go restartOnChange()
 
   blob.StartProcessors()
@@ -105,7 +104,7 @@ func main() {
 
   blob.MakeBranch(*watch_target, nil, nil)
 
-  go network.Start(*listen_port, apikey)
+  go network.Start(*listen_port)
   interrupt := make(chan os.Signal, 2)
   signal.Notify(interrupt, os.Interrupt)
   <-interrupt

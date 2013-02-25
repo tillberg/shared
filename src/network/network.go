@@ -1,5 +1,5 @@
 
-package network;
+package network
 
 import (
   "bufio"
@@ -12,10 +12,13 @@ import (
   "net"
   "time"
   "code.google.com/p/goprotobuf/proto"
-  "../sharedpb"
+  "github.com/tillberg/goconfig/conf"
   "../blob"
+  "../sharedpb"
   "../types"
 )
+
+var apikey = ""
 
 func GetShortHexString(bytes []byte) string {
   return GetHexString(bytes[:8])
@@ -37,78 +40,77 @@ func WriteUvarint(writer *bufio.Writer, number uint64) {
   writer.Write(buf[:numBytes])
 }
 
-func SendMessage(message *sharedpb.Message, writer *bufio.Writer) error {
-  return SendSignedMessage(message, writer, "")
-}
-
 // This is not a public-key cryptographic signature.  We should switch over
 // to a proper signature when we start to deal with multi-user schemes.
-func GenerateSignature(bytes []byte, key string) []byte  {
+func GenerateSignature(bytes []byte) []byte  {
   h := sha256.New()
-  h.Write([]byte(key))
+  h.Write([]byte(apikey))
   h.Write(bytes)
-  h.Write([]byte(key))
+  h.Write([]byte(apikey))
   return h.Sum([]byte{})
 }
 
-func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer, apikey string) error {
+func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
   now := uint64(time.Now().Unix())
   message.Timestamp = &now
   messageBytes, err := proto.Marshal(message)
-  if err != nil { return err }
+  check(err)
   numMessageBytes := uint64(len(messageBytes))
   preamble := &sharedpb.Preamble{Length: &numMessageBytes}
-  if apikey != "" {
-    preamble.Signature = GenerateSignature(messageBytes, apikey)
-  }
+  preamble.Signature = GenerateSignature(messageBytes)
   preambleBytes, err := proto.Marshal(preamble)
-  if err != nil { return err }
+  check(err)
   WriteUvarint(writer, uint64(len(preambleBytes)))
   _, err = writer.Write(preambleBytes)
-  if err != nil { return err }
+  check(err)
   _, err = writer.Write(messageBytes)
-  if err != nil { return err }
+  check(err)
   writer.Flush()
-  return nil
 }
 
-func ReceiveMessage(reader *bufio.Reader, apikey string) (*sharedpb.Message, bool, error) {
+func SendSingleMessage(message *sharedpb.Message, address string) {
+  start := time.Now()
+  for {
+    remoteAddr, err := net.ResolveTCPAddr("tcp", address)
+    check(err)
+    conn, err := net.DialTCP("tcp", nil, remoteAddr)
+    if err != nil {
+      if time.Since(start) > time.Second {
+        log.Fatal(err)
+      }
+      time.Sleep(10 * time.Millisecond)
+      continue
+    }
+    writer := bufio.NewWriter(conn)
+    SendSignedMessage(message, writer)
+    break
+  }
+}
+
+func ReceiveMessage(reader *bufio.Reader) (*sharedpb.Message, bool) {
   preambleSize, err := binary.ReadUvarint(reader)
-  if err != nil { return nil, false, err }
+  check(err)
   bufPreamble := make([]byte, preambleSize)
   _, err = io.ReadFull(reader, bufPreamble)
-  if err != nil { return nil, false, err }
+  check(err)
   preamble := &sharedpb.Preamble{}
   err = proto.Unmarshal(bufPreamble, preamble)
-  if err != nil { return nil, false, err }
+  check(err)
 
   bufMessage := make([]byte, *preamble.Length)
   _, err = io.ReadFull(reader, bufMessage)
-  if err != nil { return nil, false, err }
+  check(err)
   message := &sharedpb.Message{}
   err = proto.Unmarshal(bufMessage, message)
-  if err != nil { return nil, false, err }
+  check(err)
 
   valid := false
   if preamble.Signature != nil {
-    correct := GenerateSignature(bufMessage, apikey)
+    correct := GenerateSignature(bufMessage)
     valid = bytes.Equal(preamble.Signature, correct)
   }
 
-  return message, valid, nil
-}
-
-func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey string) {
-  s := "master"
-  outbox<-&sharedpb.Message{SubscribeBranch: &s}
-  types.BlobServicerChannel <- outbox
-  writer := bufio.NewWriter(conn)
-  for {
-    message := <- outbox
-    err := SendSignedMessage(message, writer, apikey)
-    check(err)
-    log.Printf("Sent %s", message.MessageString())
-  }
+  return message, valid
 }
 
 func SubscribeToBranch(name string, outbox chan *sharedpb.Message) {
@@ -122,11 +124,22 @@ func SubscribeToBranch(name string, outbox chan *sharedpb.Message) {
   }
 }
 
-func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey string) {
+func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
+  s := "master"
+  outbox<-&sharedpb.Message{SubscribeBranch: &s}
+  types.BlobServicerChannel <- outbox
+  writer := bufio.NewWriter(conn)
+  for {
+    message := <- outbox
+    SendSignedMessage(message, writer)
+    log.Printf("Sent %s", message.MessageString())
+  }
+}
+
+func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   reader := bufio.NewReader(conn)
   for {
-    message, valid, err := ReceiveMessage(reader, apikey)
-    check(err)
+    message, valid := ReceiveMessage(reader)
     if !valid {
       log.Fatal("Invalid message received")
     }
@@ -140,21 +153,27 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message, apikey strin
       types.BranchUpdateChannel <- branchUpdate
     } else if message.SubscribeBranch != nil {
       go SubscribeToBranch(*message.SubscribeBranch, outbox)
+    } else if message.AddRemote != nil {
+      for _, address := range message.AddRemote {
+        go makeConnection(address)
+      }
     } else {
       log.Fatal("Unknown incoming message", message.MessageString())
     }
   }
 }
 
-func startConnections(conn *net.TCPConn, apikey string) {
+func startConnections(conn *net.TCPConn) {
   outbox := make(chan *sharedpb.Message, 10)
-  go connOutgoing(conn, outbox, apikey)
-  connIncoming(conn, outbox, apikey)
+  go connOutgoing(conn, outbox)
+  connIncoming(conn, outbox)
 }
 
-func makeConnection(remoteAddr *net.TCPAddr, apikey string) {
+func makeConnection(address string) {
   start := time.Now()
   for {
+    remoteAddr, err := net.ResolveTCPAddr("tcp", address)
+    check(err)
     conn, err := net.DialTCP("tcp", nil, remoteAddr)
     if err != nil {
       if time.Since(start) > time.Second {
@@ -163,29 +182,29 @@ func makeConnection(remoteAddr *net.TCPAddr, apikey string) {
       time.Sleep(10 * time.Millisecond)
       continue
     }
-    log.Printf("Connected to %s.", remoteAddr)
-    startConnections(conn, apikey)
+    log.Printf("Connected to %s.", address)
+    startConnections(conn)
   }
 }
 
-func handleConnection(conn *net.TCPConn, apikey string) {
+func handleConnection(conn *net.TCPConn) {
   log.Printf("Connection received from %s", conn.RemoteAddr().String())
-  startConnections(conn, apikey)
+  startConnections(conn)
 }
 
-func ListenForConnections(ln *net.TCPListener, apikey string) {
+func ListenForConnections(ln *net.TCPListener) {
   for {
     conn, err := ln.AcceptTCP()
     if err != nil {
       log.Print(err)
       continue
     }
-    go handleConnection(conn, apikey)
+    go handleConnection(conn)
   }
 }
 
-func Start(listenPort int, apikey string) {
-  listen_addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", listenPort));
+func Start(listenPort int) {
+  listen_addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", listenPort))
   check(err)
   ln, err := net.ListenTCP("tcp", listen_addr)
   check(err)
@@ -193,10 +212,12 @@ func Start(listenPort int, apikey string) {
   log.Printf("Listening on port %d.", listenPort)
   // XXX omg kludge.  Need to figure out how to properly negotiate
   // unique full-duplex P2P connections.
-  if listenPort == 9252 {
-    remote_addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:9251");
-    check(err)
-    go makeConnection(remote_addr, apikey)
-  }
-  ListenForConnections(ln, apikey)
+  ListenForConnections(ln)
+}
+
+func init() {
+  config, err := conf.ReadConfigFile("shared.ini")
+  check(err)
+  apikey, err = config.GetString("main", "apikey")
+  check(err)
 }
