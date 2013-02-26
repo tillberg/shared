@@ -2,10 +2,12 @@
 package shared_test
 
 import (
+  "os"
+  "path"
   "testing"
+  "time"
   "./test"
   "io/ioutil"
-  "time"
 )
 
 func AssertContents(t *testing.T, timeout time.Duration, path string, contents string) {
@@ -25,33 +27,38 @@ func AssertContents(t *testing.T, timeout time.Duration, path string, contents s
 var fastTimeout = 100 * time.Millisecond
 var timeout = 250 * time.Millisecond
 
+func WriteFile(filepath string, contents string) {
+  os.MkdirAll(path.Base(filepath), 0755)
+  ioutil.WriteFile(filepath, []byte(contents), 0644)
+}
+
 func TestBasic(t *testing.T) {
   setup := test.SetUp()
   defer test.TearDown(setup)
-  ioutil.WriteFile("/tmp/sync1/testfile", []byte{}, 0644)
+  WriteFile("/tmp/sync1/testfile", "")
   AssertContents(t, timeout, "/tmp/sync2/testfile", "")
 }
 
 func TestContents(t* testing.T) {
   setup := test.SetUp()
   defer test.TearDown(setup)
-  ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
+  WriteFile("/tmp/sync1/testfile", "hello")
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
 }
 
 func TestTwo(t* testing.T) {
   setup := test.SetUp()
   defer test.TearDown(setup)
-  ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
-  ioutil.WriteFile("/tmp/sync1/testfile2", []byte("hello to you"), 0644)
+  WriteFile("/tmp/sync1/testfile", "hello")
+  WriteFile("/tmp/sync1/testfile2", "hello to you")
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
   AssertContents(t, fastTimeout, "/tmp/sync2/testfile2", "hello to you")
 }
 
 func TestTwoBefore(t* testing.T) {
   test.Cleanup()
-  ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
-  ioutil.WriteFile("/tmp/sync1/testfile2", []byte("hello to you"), 0644)
+  WriteFile("/tmp/sync1/testfile", "hello")
+  WriteFile("/tmp/sync1/testfile2", "hello to you")
   setup := test.Start()
   defer test.TearDown(setup)
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
@@ -64,8 +71,8 @@ func TestTwoConnectDuring(t* testing.T) {
   test.StartA(setup)
   test.StartB(setup)
   defer test.TearDown(setup)
-  ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
-  ioutil.WriteFile("/tmp/sync1/testfile2", []byte("hello to you"), 0644)
+  WriteFile("/tmp/sync1/testfile", "hello")
+  WriteFile("/tmp/sync1/testfile2", "hello to you")
   test.ConnectBA()
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
   AssertContents(t, fastTimeout, "/tmp/sync2/testfile2", "hello to you")
