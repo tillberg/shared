@@ -77,3 +77,23 @@ func TestTwoConnectDuring(t* testing.T) {
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
   AssertContents(t, fastTimeout, "/tmp/sync2/testfile2", "hello to you")
 }
+
+func TestSingleRevision(t* testing.T) {
+  setup := test.SetUp()
+  defer test.TearDown(setup)
+  WriteFile("/tmp/sync1/testfile", "hello")
+  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
+  WriteFile("/tmp/sync1/testfile", "hello to you")
+  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello to you")
+}
+
+func TestMultipleRevisionLateStartup(t* testing.T) {
+  test.Cleanup()
+  WriteFile("/tmp/sync1/testfile", "hello")
+  WriteFile("/tmp/sync1/testfile", "hello to you")
+  setup := test.Start()
+  defer test.TearDown(setup)
+  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello to you")
+  WriteFile("/tmp/sync1/testfile", "hello")
+  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
+}
