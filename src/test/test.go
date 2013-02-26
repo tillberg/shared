@@ -105,9 +105,13 @@ func SetUp() *TestSetup {
   return Start()
 }
 
+func Stop(setup* TestSetup) {
+  setup.quit<-"quit"
+  setup.quit<-"quit"
+  <-setup.ready
+  <-setup.ready
+}
+
 func TearDown(setup *TestSetup) {
-  setup.quit<-"quit"
-  setup.quit<-"quit"
-  <-setup.ready
-  <-setup.ready
+  Stop(setup)
 }
