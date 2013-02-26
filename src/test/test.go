@@ -84,6 +84,9 @@ func StartA(setup *TestSetup) {
 func StartB(setup *TestSetup) {
   go Launch("B", "/tmp/cache2", "/tmp/sync2", "9252", setup)
   <-setup.ready
+}
+
+func ConnectBA() {
   address := "localhost:9251"
   message := &sharedpb.Message{AddRemote: []string{address}}
   network.SendSingleMessage(message, "localhost:9252")
@@ -93,6 +96,7 @@ func Start() *TestSetup {
   setup := Init()
   StartA(setup)
   StartB(setup)
+  ConnectBA()
   return setup
 }
 

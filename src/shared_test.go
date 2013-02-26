@@ -57,3 +57,16 @@ func TestTwoBefore(t* testing.T) {
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
   AssertContents(t, fastTimeout, "/tmp/sync2/testfile2", "hello to you")
 }
+
+func TestTwoConnectDuring(t* testing.T) {
+  test.Cleanup()
+  setup := test.Init()
+  test.StartA(setup)
+  test.StartB(setup)
+  defer test.TearDown(setup)
+  ioutil.WriteFile("/tmp/sync1/testfile", []byte("hello"), 0644)
+  ioutil.WriteFile("/tmp/sync1/testfile2", []byte("hello to you"), 0644)
+  test.ConnectBA()
+  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
+  AssertContents(t, fastTimeout, "/tmp/sync2/testfile2", "hello to you")
+}
