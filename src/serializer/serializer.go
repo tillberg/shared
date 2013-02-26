@@ -4,30 +4,27 @@ package serializer
 import (
   "log"
   "github.com/tillberg/goconfig/conf"
+  "../types"
+  "./gut"
+  "./proto"
 )
 
 type Serializer interface {
-  UnmarshalBranch(bytes []byte) (*types.Branch, error)
-  UnmarshalFile  (bytes []byte) (*types.File,   error)
-  UnmarshalCommit(bytes []byte) (*types.Commit, error)
-  UnmarshalTree  (bytes []byte) (*types.Tree,   error)
-
-  MarshalBranch(branch *types.Branch) []byte, error
-  MarshalFile  (file   *types.File)   []byte, error
-  MarshalCommit(commit *types.Commit) []byte, error
-  MarshalTree  (tree   *types.Tree)   []byte, error
+  Unmarshal(bytes []byte)   (*types.Blob, error)
+  Marshal(blob *types.Blob) ([]byte, error)
 }
 
-func GetConfiguredSerializer() *Serializer {
+func Configured() Serializer {
   config, err := conf.ReadConfigFile("shared.ini")
-  check(err)
-  serializer, err = config.GetString("main", "serializer")
-  check(err)
+  types.Check(err)
+  serializer, err := config.GetString("main", "serializer")
+  types.Check(err)
   if serializer == "gut" {
-    return *Serializer(&gut.Serializer{})
+    return Serializer(&gut.Serializer{})
   } else if serializer == "proto" {
-    return *Serializer(&proto.Serializer{})
+    return Serializer(&proto.Serializer{})
   } else {
     log.Fatalf("Unrecognized serializer configured: %s", serializer)
   }
+  return nil
 }

@@ -3,22 +3,27 @@ package storage
 
 import (
   "log"
-  "../sharedpb"
+  "github.com/tillberg/goconfig/conf"
+  "../types"
+  "./gut"
 )
 
 type Storage interface {
-  Get(hash []byte) []byte, error
-  Put(bytes []byte) []byte, error
+  Get(hash types.Hash) ([]byte, error)
+  Put(bytes []byte)    (types.Hash, error)
 }
 
-func GetConfiguredStorage() *Storage {
+var CacheRoot = ""
+
+func Configured() Storage {
   config, err := conf.ReadConfigFile("shared.ini")
-  check(err)
-  storage, err = config.GetString("main", "storage")
-  check(err)
+  types.Check(err)
+  storage, err := config.GetString("main", "storage")
+  types.Check(err)
   if storage == "gut" {
-    return Serializer(&gut.Storage{})
+    return Storage(&gut.Storage{Root: CacheRoot})
   } else {
     log.Fatalf("Unrecognized storage configured: %s", storage)
   }
+  return nil
 }

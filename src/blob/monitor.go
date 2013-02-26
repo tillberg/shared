@@ -8,47 +8,31 @@ import (
   "os"
   "path"
   "time"
-  "code.google.com/p/goprotobuf/proto"
   "github.com/howeyc/fsnotify"
-  "../sharedpb"
+  "../serializer"
+  "../storage"
   "../types"
 )
 
 var processChannel = make(chan FileEvent, 100) // debouncing
 
-func (tree *Blob) MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan Hash, revisionChannel chan *Blob) {
+func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types.Hash, revisionChannel chan types.Hash) {
   // XXX ideally, this would be a B-Tree with distributed caching
-  var children = map[string]*Blob{}
+  var children = map[string]*types.TreeEntry{}
   updateSelf := func() {
-    pbtree := sharedpb.Tree{ Entries: []*sharedpb.TreeEntry{} }
-    for name, blob := range children {
-      Flags := uint32(0644)
-      IsTree := false
-      Name := name
-      pbtree.Entries = append(pbtree.Entries, &sharedpb.TreeEntry{
-        Hash: blob.Hash(),
-        Flags: &Flags,
-        IsTree: &IsTree,
-        Name: &Name,
+    tree := &types.Tree{Entries: []*types.TreeEntry{}}
+    for name, treeEntry := range children {
+      tree.Entries = append(tree.Entries, &types.TreeEntry{
+        Hash: treeEntry.Hash,
+        Flags: uint32(0644),
+        Name: name,
       })
     }
-    tree.bytes, _ = proto.Marshal(&pbtree)
-    tree.hash = nil
-    tree.EnsureCached()
-    revisionChannel <- tree
-  }
-  unpackSelf := func() {
-    pbtree := &sharedpb.Tree{}
-    err := proto.Unmarshal(tree.bytes, pbtree)
+    bytes, err := serializer.Configured().Marshal(&types.Blob{Tree: tree})
     check(err)
-    children = map[string]*Blob{}
-    log.Printf("Unpacking %d entries", len(pbtree.Entries))
-    for _, entry := range pbtree.Entries {
-      blob := GetBlob(entry.Hash)
-      children[*entry.Name] = blob
-      ioutil.WriteFile(path.Join(rootPath, *entry.Name), blob.Bytes(), 0644)
-      log.Printf("Unpacked %s %s", *entry.Name, GetShortHexString(entry.Hash))
-    }
+    hash, err := storage.Configured().Put(bytes)
+    check(err)
+    revisionChannel <- hash
   }
   for {
     select {
@@ -61,27 +45,35 @@ func (tree *Blob) MonitorTree(rootPath string, input chan FileUpdate, mergeChann
             updateSelf()
           }
         } else {
-          if children[filename] == nil ||
-             children[filename].HashString() != fileUpdate.blob.HashString() {
+          hash, err := storage.Configured().Put(fileUpdate.bytes)
+          check(err)
+          if children[filename] == nil || !bytes.Equal(hash, children[filename].Hash) {
             op := "Added"
             if children[filename] != nil { op = "Updated" }
-            log.Printf("%s %s %d %#x", op, filename, fileUpdate.size, fileUpdate.blob.ShortHash())
-            children[filename] = fileUpdate.blob
+            log.Printf("%s %s %d %#x", op, filename, fileUpdate.size, GetShortHexString(hash))
+            children[filename] = &types.TreeEntry{Hash: hash}
             updateSelf()
           }
         }
       case mergeHash := <-mergeChannel:
-        blob := GetBlob(mergeHash)
-        tree.bytes = blob.Bytes()
-        tree.hash = blob.Hash()
-        log.Printf("Merging %s into tree (%d bytes)", blob.ShortHashString(), len(tree.bytes))
-        unpackSelf()
+        // This is not a merge but a destructive fast-forward
+        _, blob := GetBlob(mergeHash)
+        tree := blob.Tree
+        log.Printf("Merging %s into tree (%d entries)", GetShortHexString(mergeHash), len(tree.Entries))
+        children = map[string]*types.TreeEntry{}
+        for _, entry := range tree.Entries {
+          children[entry.Name] = entry
+          _, fileblob := GetBlob(entry.Hash)
+          file := fileblob.File
+          ioutil.WriteFile(path.Join(rootPath, entry.Name), file.Bytes, 0644)
+          log.Printf("Unpacked %s, %s", entry.Name, GetShortHexString(entry.Hash))
+        }
     }
   }
 }
 
 type FileUpdate struct {
-  blob   *Blob
+  bytes  []byte
   path   string
   exists bool
   size   int64
@@ -98,16 +90,14 @@ func processChange(inputChannel chan FileEvent) {
     statbuf, err := os.Stat(event.path)
     if err != nil {
       // The file was deleted or otherwise doesn't exist
-      event.resultChannel <- FileUpdate{MakeEmptyFileBlob(), event.path, false, 0}
+      event.resultChannel <- FileUpdate{path: event.path, exists: false}
     } else {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
       bytes, err := ioutil.ReadFile(event.path)
       check(err)
-      blob := MakeFileBlobFromBytes(bytes)
-      blob.EnsureCached()
       // Send the update back to the tree's result channel
-      event.resultChannel <- FileUpdate{blob, event.path, true, statbuf.Size()}
+      event.resultChannel <- FileUpdate{bytes: bytes, path: event.path, exists: true, size: statbuf.Size()}
     }
   }
 }
@@ -154,19 +144,22 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
   }
 }
 
-func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel chan Hash) {
+func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, mergeChannel chan types.Hash) {
   branchReceiveChannel := make(chan types.BranchStatus, 10)
   subscription := types.BranchSubscription{Name: "master", ResponseChannel: branchReceiveChannel}
   types.BranchSubscribeChannel <- subscription
   for {
     select {
-      case newTree := <-revisionChannel:
-        log.Printf("New branch revision: %s", newTree.ShortHashString())
-        name := "master"
-        types.BranchUpdateChannel <- types.BranchStatus{Name: name, Hash: newTree.Hash()}
-        commit.root = newTree
+      case newHash := <-revisionChannel:
+        log.Printf("New branch revision: %s", GetShortHexString(newHash))
+        commit = &types.Commit{
+          Text: "awesome",
+          Tree: newHash,
+          Parents: []types.Hash{}, // this needs the previous *commit* hash
+        }
+        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: newHash}
       case newBranchStatus := <-branchReceiveChannel:
-        if !bytes.Equal(commit.root.Hash(), newBranchStatus.Hash) {
+        if !bytes.Equal(commit.Tree, newBranchStatus.Hash) {
           // log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
           mergeChannel <- newBranchStatus.Hash
         }
@@ -174,18 +167,13 @@ func (commit *Commit) WatchRevisions(revisionChannel chan *Blob, mergeChannel ch
   }
 }
 
-func MakeBranch(path string, previous *Commit, root *Blob) *Commit {
-  revisionChannel := make(chan *Blob, 10)
-  mergeChannel := make(chan Hash, 10)
-  if root == nil {
-    root = MakeTreeBlob(path, revisionChannel, mergeChannel)
-  }
-  me := Commit{
-    root: root,
-    previous: previous,
-  }
-  go me.WatchRevisions(revisionChannel, mergeChannel)
-  return &me
+func MakeBranch(path string, previous *types.Commit, root *types.Tree) {
+  revisionChannel := make(chan types.Hash, 10)
+  mergeChannel := make(chan types.Hash, 10)
+  // if root == nil {
+  //   root = MakeEmptyTreeBlob(path, revisionChannel, mergeChannel)
+  // }
+  go WatchRevisions(&types.Commit{Tree: types.Hash{}}, revisionChannel, mergeChannel)
 }
 
 func StartProcessors() {

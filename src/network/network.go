@@ -50,6 +50,11 @@ func GenerateSignature(bytes []byte) []byte  {
   return h.Sum([]byte{})
 }
 
+func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
+  bytes, _ := blob.GetBlob(hash)
+  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: bytes}}
+}
+
 func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
   now := uint64(time.Now().Unix())
   message.Timestamp = &now
@@ -145,7 +150,7 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
     }
     log.Printf("Received %s", message.MessageString())
     if message.HashRequest != nil {
-      go blob.SendObject(message.HashRequest, outbox)
+      go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
       types.BlobReceiveChannel <- message.Object.Object
     } else if message.Branch != nil {

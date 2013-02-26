@@ -1,11 +1,20 @@
 
 package types
 
-import "../sharedpb"
+import (
+  "log"
+  "../sharedpb"
+)
+
+func Check(err interface{}) {
+  if err != nil {
+    log.Fatal(err)
+  }
+}
 
 type BlobRequest struct {
-  Hash            []byte
-  ResponseChannel chan []byte
+  Hash            Hash
+  ResponseChannel chan Hash
 }
 
 type BranchSubscription struct {
@@ -15,7 +24,7 @@ type BranchSubscription struct {
 
 type BranchStatus struct {
   Name string
-  Hash []byte
+  Hash Hash
 }
 
 var BlobRequestChannel     = make(chan BlobRequest, 100)
@@ -23,6 +32,13 @@ var BranchSubscribeChannel = make(chan BranchSubscription, 100)
 var BranchUpdateChannel    = make(chan BranchStatus, 100)
 var BlobReceiveChannel     = make(chan []byte, 100)
 var BlobServicerChannel    = make(chan chan *sharedpb.Message, 10)
+
+type Hash []byte
+
+type HashedBlob struct {
+  Hash Hash
+  Blob Blob
+}
 
 type Blob struct {
   // Only one of these should ever be defined:
@@ -38,21 +54,21 @@ type File struct {
 
 type Branch struct {
   Name   string
-  Commit []byte
+  Commit Hash
 }
 
 type Commit struct {
   Text    string
-  Tree    []byte
-  Parents [][]byte
+  Tree    Hash
+  Parents []Hash
 }
 
 type Tree struct {
-  Entries []TreeEntry
+  Entries []*TreeEntry
 }
 
 type TreeEntry struct {
-  Blob []byte
+  Hash Hash
   Name string
   Flags uint32
 }

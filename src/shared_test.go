@@ -28,7 +28,7 @@ var fastTimeout = 100 * time.Millisecond
 var timeout = 250 * time.Millisecond
 
 func WriteFile(filepath string, contents string) {
-  os.MkdirAll(path.Base(filepath), 0755)
+  os.MkdirAll(path.Dir(filepath), 0755)
   ioutil.WriteFile(filepath, []byte(contents), 0644)
 }
 

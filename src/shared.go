@@ -2,12 +2,14 @@ package main
 
 import (
   "flag"
+  "fmt"
   "os"
   "os/signal"
   "log"
   "./blob"
   "./sharedpb"
   "./network"
+  "./storage"
   "./types"
   "github.com/howeyc/fsnotify"
   "github.com/tillberg/goconfig/conf"
@@ -30,9 +32,13 @@ var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 // var branchReceiveChannel = make(chan []byte, 10)
 // var BranchSubscribeChannel = make(chan *BranchSubscription, 10)
 
+func GetHexString(bytes []byte) string {
+  return fmt.Sprintf("%#x", bytes)
+}
+
 func ArbitBlobRequests() {
   servicers := []chan *sharedpb.Message{}
-  subscribers := map[string][]chan []byte{}
+  subscribers := map[string][]chan types.Hash{}
   for {
     select {
       case servicer := <-types.BlobServicerChannel:
@@ -44,13 +50,14 @@ func ArbitBlobRequests() {
         hashString := blob.GetHexString(request.Hash)
         log.Printf("Waiting for %s", blob.GetShortHexString(request.Hash))
         if subscribers[hashString] == nil {
-          subscribers[hashString] = []chan []byte{}
+          subscribers[hashString] = []chan types.Hash{}
         }
         subscribers[hashString] = append(subscribers[hashString], request.ResponseChannel)
       case bytes := <-types.BlobReceiveChannel:
-        obj := blob.MakeFileBlobFromBytes(bytes)
+        hash, err := storage.Configured().Put(bytes)
+        check(err)
         // log.Printf("Forwarding %s", GetHexString(object.Hash()))
-        for _, subscriber := range subscribers[obj.HashString()] {
+        for _, subscriber := range subscribers[GetHexString(hash)] {
           subscriber <- bytes
         }
     }
@@ -91,7 +98,7 @@ func restartOnChange() {
 func main() {
   flag.Parse()
   log.SetFlags(log.Ltime | log.Lshortfile)
-  blob.CacheRoot = *cache_root
+  storage.CacheRoot = *cache_root
   _, err := conf.ReadConfigFile("shared.ini")
   check(err)
 
