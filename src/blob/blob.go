@@ -18,7 +18,6 @@ func check(err interface{}) {
   }
 }
 
-
 type Hash []byte
 
 type Blob struct {

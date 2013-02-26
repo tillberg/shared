@@ -98,16 +98,16 @@ func TestMultipleRevisionLateStartup(t* testing.T) {
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
 }
 
-func TestMerge(t* testing.T) {
-  test.Cleanup()
-  setup := test.Start()
-  WriteFile("/tmp/sync1/testfile", "hello\nmy name is\nbob\n")
-  AssertContents(t, timeout, "/tmp/sync2/testfile", "hello\nmy name is\nbob\n")
-  test.Stop(setup)
-  WriteFile("/tmp/sync1/testfile", "hello\nsusan\nmy name is\nbob\n")
-  WriteFile("/tmp/sync2/testfile", "hello\nmy name is\npeter\n")
-  setup = test.Start()
-  defer test.TearDown(setup)
-  AssertContents(t, timeout, "/tmp/sync1/testfile", "hello\nsusan\nmy name is\npeter\n")
-  AssertContents(t, fastTimeout, "/tmp/sync2/testfile", "hello\nsusan\nmy name is\npeter\n")
-}
+// func TestMerge(t* testing.T) {
+//   test.Cleanup()
+//   setup := test.Start()
+//   WriteFile("/tmp/sync1/testfile", "hello\nmy name is\nbob\n")
+//   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello\nmy name is\nbob\n")
+//   test.Stop(setup)
+//   WriteFile("/tmp/sync1/testfile", "hello\nsusan\nmy name is\nbob\n")
+//   WriteFile("/tmp/sync2/testfile", "hello\nmy name is\npeter\n")
+//   setup = test.Start()
+//   defer test.TearDown(setup)
+//   AssertContents(t, timeout, "/tmp/sync1/testfile", "hello\nsusan\nmy name is\npeter\n")
+//   AssertContents(t, fastTimeout, "/tmp/sync2/testfile", "hello\nsusan\nmy name is\npeter\n")
+// }
