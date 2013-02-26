@@ -6,9 +6,7 @@ import (
   "../../types"
 )
 
-type Serializer struct {
-
-}
+type Serializer struct {}
 
 func (s *Serializer) Unmarshal(bytes []byte) (*types.Blob, error) {
   return nil, nil
