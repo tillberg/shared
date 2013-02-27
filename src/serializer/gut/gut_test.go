@@ -5,7 +5,7 @@ import (
   "encoding/hex"
   "fmt"
   "strings"
-  // "testing"
+  "testing"
   "../../types"
 )
 
@@ -26,14 +26,16 @@ func ExampleSerializer_Unmarshal_Branch() {
   // &{Bytes:[53 98 101 101 98 99 100 102 101 100 100 50 54 101 54 53 52 98 56 56 100 50 99 101 50 100 48 54 102 99 49 56 50 53 101 56 48 57 100 54]}
 }
 
-func ExampleSerializer_Unmarshal_Tree() {
-  s := Serializer{}
-  blob, err := s.Unmarshal([]byte(`100644 blob ce770ef0fd9f274ea9e102910396d57956edd325 .gitignore
+var exampleTreeString = `100644 blob ce770ef0fd9f274ea9e102910396d57956edd325 .gitignore
 100755 blob 094dce1db4f2dc0b25068a61fab98c746e5b4834  dev.sh
 040000 tree 6116b1ca7b8e616cd3997b4acac9e5731b34073e  proto
 040000 tree c78ce6725d1cda9b01fd4ad4701f5776ed27f4a0  src
 432176 blob 8f2a73dfc460145d671908bd6497cc6ff765d9d3  test.sh
-`))
+`
+
+func ExampleSerializer_Unmarshal_Tree() {
+  s := Serializer{}
+  blob, err := s.Unmarshal([]byte(exampleTreeString))
   check(err)
   fmt.Printf("%+v\n", blob.Tree.Entries[0])
   fmt.Printf("%+v\n", blob.Tree.Entries[1])
@@ -50,16 +52,18 @@ func ExampleSerializer_Unmarshal_Tree() {
   // true
 }
 
-func ExampleSerializer_Unmarshal_Commit() {
-  s := Serializer{}
-  blob, err := s.Unmarshal([]byte(`tree c68f49cedb6379a88f36a20ed5c6ca8bf735e73b
+var exampleCommitString = `tree c68f49cedb6379a88f36a20ed5c6ca8bf735e73b
 parent 5beebcdfedd26e654b88d2ce2d06fc1825e809d6
 parent e673cec71f4dbbe6e765f3f448f705a4c78d157f
 author Dan Tillberg <dan@tillberg.us> 1361048340 +0000
 committer Dan Tillberg <dan@tillberg.us> 1361048340 +0000
 
 Read all files in folder on startup
-`))
+`
+
+func ExampleSerializer_Unmarshal_Commit() {
+  s := Serializer{}
+  blob, err := s.Unmarshal([]byte(exampleCommitString))
   check(err)
   fmt.Printf("%+v\n", blob.Commit.Tree)
   fmt.Printf("%+v\n", blob.Commit.Parents)
@@ -73,7 +77,7 @@ Read all files in folder on startup
   // Read all files in folder on startup
 }
 
-func ExampleSerializer_Marshal_Branch() {
+func ExampleSerializer_Marshal_Tree() {
   s := Serializer{}
   hash, _ := hex.DecodeString("5beebcdfedd26e654b88d2ce2d06fc1825e809d6")
   hash2, _ := hex.DecodeString("e673cec71f4dbbe6e765f3f448f705a4c78d157f")
@@ -88,4 +92,15 @@ func ExampleSerializer_Marshal_Branch() {
   // Output:
   // 040123 tree 5beebcdfedd26e654b88d2ce2d06fc1825e809d6  bob
   // 123456 blob e673cec71f4dbbe6e765f3f448f705a4c78d157f  susan
+}
+
+func TestSerializer_Marshal_Commit(t *testing.T) {
+  s := Serializer{}
+  blob, err := s.Unmarshal([]byte(exampleCommitString))
+  check(err)
+  data, err := s.Marshal(blob)
+  text := bytes.NewBuffer(data).String()
+  if text != exampleCommitString {
+    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleCommitString)
+  }
 }

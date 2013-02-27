@@ -85,9 +85,7 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
     for _, parent := range blob.Commit.Parents {
       writer.Write([]byte(fmt.Sprintf("parent %s\n", GetHexString(parent))))
     }
-    writer.Write([]byte("author Dan Tillberg <dan@tillberg.us> 1361046035 +0000\n"))
-    writer.Write([]byte("committer Dan Tillberg <dan@tillberg.us> 1361046035 +0000\n"))
-    writer.Write([]byte("\nshared commit\n"))
+    writer.Write([]byte(blob.Commit.Text))
   } else if blob.File != nil {
     writer.Write(blob.File.Bytes)
   } else {
