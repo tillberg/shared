@@ -70,11 +70,21 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
     writer.Write([]byte(GetHexString(blob.Branch.Commit)))
   } else if blob.Tree != nil {
     for _, entry := range blob.Tree.Entries {
-      writer.Write([]byte(fmt.Sprintf("100644 blob %s\t%s\n", GetHexString(entry.Hash), entry.Name)))
+      flagsString := fmt.Sprintf("%06o", entry.Flags)
+      // e.g. 040000 is a tree.  we don't record the "tree"/"blob" flag, but git does
+      typeString := "blob"
+      if entry.Flags >> 9 == 040 {
+        typeString = "tree"
+      }
+      hexHash := GetHexString(entry.Hash)
+      // flagsString := strings.Replace(strconv.FormatUint(uint64(entry.Flags), 8), " ", "0", -1)
+      writer.Write([]byte(fmt.Sprintf("%s %s %s\t%s\n", flagsString, typeString, hexHash, entry.Name)))
     }
   } else if blob.Commit != nil {
     writer.Write([]byte(fmt.Sprintf("tree %s\n", GetHexString(blob.Commit.Tree))))
-    // writer.Write(fmt.Sprintf("parent %s\n", ))
+    for _, parent := range blob.Commit.Parents {
+      writer.Write([]byte(fmt.Sprintf("parent %s\n", GetHexString(parent))))
+    }
     writer.Write([]byte("author Dan Tillberg <dan@tillberg.us> 1361046035 +0000\n"))
     writer.Write([]byte("committer Dan Tillberg <dan@tillberg.us> 1361046035 +0000\n"))
     writer.Write([]byte("\nshared commit\n"))

@@ -1,8 +1,12 @@
 package gut
 
 import (
+  "bytes"
+  "encoding/hex"
   "fmt"
+  "strings"
   // "testing"
+  "../../types"
 )
 
 func check(err error) {
@@ -67,4 +71,21 @@ Read all files in folder on startup
   // committer Dan Tillberg <dan@tillberg.us> 1361048340 +0000
   //
   // Read all files in folder on startup
+}
+
+func ExampleSerializer_Marshal_Branch() {
+  s := Serializer{}
+  hash, _ := hex.DecodeString("5beebcdfedd26e654b88d2ce2d06fc1825e809d6")
+  hash2, _ := hex.DecodeString("e673cec71f4dbbe6e765f3f448f705a4c78d157f")
+  entries := []*types.TreeEntry{
+    &types.TreeEntry{Hash: hash, Name: "bob", Flags: 040123},
+    &types.TreeEntry{Hash: hash2, Name: "susan", Flags: 0123456},
+  }
+  data, err := s.Marshal(&types.Blob{Tree: &types.Tree{Entries: entries}})
+  check(err)
+  text := bytes.NewBuffer(data).String()
+  fmt.Println(strings.Replace(text, "\t", "  ", -1))
+  // Output:
+  // 040123 tree 5beebcdfedd26e654b88d2ce2d06fc1825e809d6  bob
+  // 123456 blob e673cec71f4dbbe6e765f3f448f705a4c78d157f  susan
 }
