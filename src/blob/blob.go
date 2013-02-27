@@ -28,7 +28,7 @@ func check(err interface{}) {
 func GetBlob(hash types.Hash) ([]byte, *types.Blob) {
   bytes, err := storage.Configured().Get(hash)
   if err == nil {
-    log.Printf("Found %s in cache", GetShortHexString(hash))
+    log.Printf("Found %s in cache, %d bytes", GetShortHexString(hash), len(bytes))
   } else {
     responseChannel := make(chan types.Hash)
     // XXX this should be more ... targetted

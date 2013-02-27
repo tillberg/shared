@@ -17,7 +17,7 @@ message Message {
 
 message Object {
   required bytes Hash = 1;
-  required bytes Object = 2;
+  optional bytes Object = 2;
 }
 
 message Branch {

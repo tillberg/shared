@@ -57,8 +57,9 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
         }
       case mergeHash := <-mergeChannel:
         // This is not a merge but a destructive fast-forward
-        _, blob := GetBlob(mergeHash)
-        tree := blob.Tree
+        _, commitBlob := GetBlob(mergeHash)
+        _, treeBlob := GetBlob(commitBlob.Commit.Tree)
+        tree := treeBlob.Tree
         log.Printf("Merging %s into tree (%d entries)", GetShortHexString(mergeHash), len(tree.Entries))
         children = map[string]*types.TreeEntry{}
         for _, entry := range tree.Entries {
@@ -148,16 +149,25 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
   branchReceiveChannel := make(chan types.BranchStatus, 10)
   subscription := types.BranchSubscription{Name: "master", ResponseChannel: branchReceiveChannel}
   types.BranchSubscribeChannel <- subscription
+  var lastCommitHash types.Hash
   for {
     select {
       case newHash := <-revisionChannel:
-        log.Printf("New branch revision: %s", GetShortHexString(newHash))
         commit = &types.Commit{
           Text: "awesome",
           Tree: newHash,
           Parents: []types.Hash{}, // this needs the previous *commit* hash
         }
-        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: newHash}
+        if lastCommitHash != nil {
+          commit.Parents = append(commit.Parents, lastCommitHash)
+        }
+        commitBytes, err := serializer.Configured().Marshal(&types.Blob{Commit: commit})
+        check(err)
+        commitHash, err := storage.Configured().Put(commitBytes)
+        check(err)
+        log.Printf("New branch revision: %s", GetShortHexString(commitHash))
+        lastCommitHash = commitHash
+        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash}
       case newBranchStatus := <-branchReceiveChannel:
         if !bytes.Equal(commit.Tree, newBranchStatus.Hash) {
           // log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
@@ -171,8 +181,9 @@ func MakeBranch(path string, previous *types.Commit, root *types.Tree) {
   revisionChannel := make(chan types.Hash, 10)
   mergeChannel := make(chan types.Hash, 10)
   // if root == nil {
-  //   root = MakeEmptyTreeBlob(path, revisionChannel, mergeChannel)
+  //   root =
   // }
+  MakeEmptyTreeBlob(path, revisionChannel, mergeChannel)
   go WatchRevisions(&types.Commit{Tree: types.Hash{}}, revisionChannel, mergeChannel)
 }
 

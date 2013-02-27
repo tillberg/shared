@@ -1,6 +1,7 @@
 package main
 
 import (
+  "bytes"
   "flag"
   "fmt"
   "os"
@@ -64,6 +65,28 @@ func ArbitBlobRequests() {
   }
 }
 
+func CommitIsNew(commit types.Hash, commitOld types.Hash) bool {
+  allCommits := []types.Hash{}
+  stack := []types.Hash{commitOld}
+  for len(stack) > 0 {
+    next := stack[0]
+    if bytes.Equal(next, commit) {
+      return false
+    }
+    stack = stack[1:]
+    allCommits = append(allCommits, next)
+    _, commitBlob := blob.GetBlob(next)
+    if commitBlob.Commit == nil {
+      log.Printf("%#v", commitBlob)
+      log.Fatalf("Could not find commit %s", blob.GetShortHexString(next))
+    }
+    for _, parent := range commitBlob.Commit.Parents {
+      stack = append(stack, parent)
+    }
+  }
+  return true
+}
+
 func ArbitBranchStatus() {
   subscribers := map[string][]chan types.BranchStatus{}
   statuses := map[string]*types.BranchStatus{}
@@ -80,9 +103,11 @@ func ArbitBranchStatus() {
         }
       case branchStatus := <-types.BranchUpdateChannel:
         branch := branchStatus.Name
-        statuses[branch] = &branchStatus
-        for _, subscriber := range subscribers[branch] {
-          subscriber <- branchStatus
+        if statuses[branch] == nil || CommitIsNew(branchStatus.Hash, statuses[branch].Hash) {
+          statuses[branch] = &branchStatus
+          for _, subscriber := range subscribers[branch] {
+            subscriber <- branchStatus
+          }
         }
     }
   }

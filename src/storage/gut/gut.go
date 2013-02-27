@@ -31,7 +31,7 @@ func calculateHash(bytes []byte) types.Hash {
 func (s *Storage) Get(hash types.Hash) (data []byte, err error) {
   cachePath := s.getCachePath(hash)
   _, err = os.Stat(cachePath)
-  if err != nil {
+  if err == nil {
     data, err = ioutil.ReadFile(cachePath)
   }
   return data, err

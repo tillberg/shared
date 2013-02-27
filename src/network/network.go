@@ -52,12 +52,14 @@ func GenerateSignature(bytes []byte) []byte  {
 
 func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
   bytes, _ := blob.GetBlob(hash)
+  // log.Printf("bytes: %d", len(bytes))
   dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: bytes}}
 }
 
 func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
   now := uint64(time.Now().Unix())
   message.Timestamp = &now
+  // log.Printf("Going to send %s", message.MessageString())
   messageBytes, err := proto.Marshal(message)
   check(err)
   numMessageBytes := uint64(len(messageBytes))
