@@ -4,31 +4,43 @@ package gut
 import (
   "bufio"
   "bytes"
+  "encoding/hex"
   "errors"
   "fmt"
   "regexp"
+  "strings"
   "../../types"
 )
 
 type Serializer struct {}
 
-func (s *Serializer) Unmarshal(bytes []byte) (*types.Blob, error) {
+func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
   // XXX these regexps are not complete...
   regexpTreeWhole := regexp.MustCompile("^((\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n)+$")
-  // regexpTreeLine := regexp.MustCompile("(\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n")
+  regexpTreeLine := regexp.MustCompile("(\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n")
   regexpCommit := regexp.MustCompile("^tree [0-9a-f]{40}")
   regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob := &types.Blob{}
-  if regexpBranch.Match(bytes) {
-
-  } else if regexpTreeWhole.Match(bytes) {
-
-  } else if regexpCommit.Match(bytes) {
-
-  } else {
-    blob.File = &types.File{Bytes: bytes}
+  if regexpBranch.Match(data) {
+    fullText := bytes.NewBuffer(data).String()
+    hash, _ := hex.DecodeString(fullText)
+    blob.Branch = &types.Branch{Commit: hash}
   }
-  return nil, nil
+  if regexpTreeWhole.Match(data) {
+    blob.Tree = &types.Tree{Entries: []*types.TreeEntry{}}
+    fullText := bytes.NewBuffer(data).String()
+    for _, line := range strings.Split(fullText, "\n") {
+      submatches := regexpTreeLine.FindStringSubmatch(line)
+      hash, _ := hex.DecodeString(submatches[2])
+      entry := &types.TreeEntry{Hash: hash, Name: submatches[3], Flags: 0644}
+      blob.Tree.Entries = append(blob.Tree.Entries, entry)
+    }
+  }
+  if regexpCommit.Match(data) {
+
+  }
+  blob.File = &types.File{Bytes: data}
+  return blob, nil
 }
 
 func GetHexString(bytes []byte) string {
