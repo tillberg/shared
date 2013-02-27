@@ -58,6 +58,9 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
       case mergeHash := <-mergeChannel:
         // This is not a merge but a destructive fast-forward
         _, commitBlob := GetBlob(mergeHash)
+        if commitBlob.Commit == nil {
+          log.Fatalf("Tried to merge commit %s but got %v instead", GetShortHexString(mergeHash), commitBlob)
+        }
         _, treeBlob := GetBlob(commitBlob.Commit.Tree)
         tree := treeBlob.Tree
         log.Printf("Merging %s into tree (%d entries)", GetShortHexString(mergeHash), len(tree.Entries))
