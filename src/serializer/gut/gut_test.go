@@ -45,3 +45,26 @@ func ExampleSerializer_Unmarshal_Tree() {
   // &{Hash:[143 42 115 223 196 96 20 93 103 25 8 189 100 151 204 111 247 101 217 211] Name: test.sh Flags:144510}
   // true
 }
+
+func ExampleSerializer_Unmarshal_Commit() {
+  s := Serializer{}
+  blob, err := s.Unmarshal([]byte(`tree c68f49cedb6379a88f36a20ed5c6ca8bf735e73b
+parent 5beebcdfedd26e654b88d2ce2d06fc1825e809d6
+parent e673cec71f4dbbe6e765f3f448f705a4c78d157f
+author Dan Tillberg <dan@tillberg.us> 1361048340 +0000
+committer Dan Tillberg <dan@tillberg.us> 1361048340 +0000
+
+Read all files in folder on startup
+`))
+  check(err)
+  fmt.Printf("%+v\n", blob.Commit.Tree)
+  fmt.Printf("%+v\n", blob.Commit.Parents)
+  fmt.Printf("%+v\n", blob.Commit.Text)
+  // Output:
+  // [198 143 73 206 219 99 121 168 143 54 162 14 213 198 202 139 247 53 231 59]
+  // [[91 238 188 223 237 210 110 101 75 136 210 206 45 6 252 24 37 232 9 214] [230 115 206 199 31 77 187 230 231 101 243 244 72 247 5 164 199 141 21 127]]
+  // author Dan Tillberg <dan@tillberg.us> 1361048340 +0000
+  // committer Dan Tillberg <dan@tillberg.us> 1361048340 +0000
+  //
+  // Read all files in folder on startup
+}

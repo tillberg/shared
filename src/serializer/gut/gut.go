@@ -17,9 +17,10 @@ type Serializer struct {}
 
 func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
   // XXX these regexps are not complete...
-  regexpTreeWhole := regexp.MustCompile("^(\\d{6} (blob|tree) [0-9a-f]{40}\\s[^\\n]+\\n)+$")
-  regexpTreeLine := regexp.MustCompile("^(\\d{6}) (blob|tree) ([0-9a-f]{40})\\s([^\\n]+)$")
-  regexpCommit := regexp.MustCompile("^tree [0-9a-f]{40}")
+  regexpTreeWhole := regexp.MustCompile(`^(\d{6} (blob|tree) [0-9a-f]{40}\s[^\n]+\n)+$`)
+  regexpTreeLine := regexp.MustCompile(`^(\d{6}) (blob|tree) ([0-9a-f]{40})\s([^\n]+)$`)
+  regexpCommit := regexp.MustCompile(`^tree ([0-9a-f]{40})\n((parent [0-9a-f]{40}\n)*)((.|\n)+)$`)
+  regexpCommitLine := regexp.MustCompile(`^(tree|parent) ([0-9a-f]{40})$`)
   regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob := &types.Blob{}
   if regexpBranch.Match(data) {
@@ -31,9 +32,9 @@ func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
     blob.Tree = &types.Tree{Entries: []*types.TreeEntry{}}
     fullText := bytes.NewBuffer(data).String()
     for _, line := range strings.Split(fullText, "\n") {
-      submatches := regexpTreeLine.FindStringSubmatch(line)
       // XXX we really just want to exclude the last empty line
-      if len(submatches) >= 3 {
+      if line != "" {
+        submatches := regexpTreeLine.FindStringSubmatch(line)
         hash, _ := hex.DecodeString(submatches[3])
         flags, _ := strconv.ParseUint(submatches[1], 8, 32)
         entry := &types.TreeEntry{Hash: hash, Name: submatches[4], Flags: uint32(flags)}
@@ -42,7 +43,17 @@ func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
     }
   }
   if regexpCommit.Match(data) {
-
+    fullText := bytes.NewBuffer(data).String()
+    commitSubmatches := regexpCommit.FindStringSubmatch(fullText)
+    hash, _ := hex.DecodeString(commitSubmatches[1])
+    blob.Commit = &types.Commit{Parents: []types.Hash{}, Tree: hash, Text: commitSubmatches[4]}
+    for _, line := range strings.Split(commitSubmatches[2], "\n") {
+      if line != "" {
+        submatches := regexpCommitLine.FindStringSubmatch(line)
+        hash, _ = hex.DecodeString(submatches[2])
+        blob.Commit.Parents = append(blob.Commit.Parents, hash)
+      }
+    }
   }
   blob.File = &types.File{Bytes: data}
   return blob, nil
