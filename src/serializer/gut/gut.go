@@ -8,6 +8,7 @@ import (
   "errors"
   "fmt"
   "regexp"
+  "strconv"
   "strings"
   "../../types"
 )
@@ -16,8 +17,8 @@ type Serializer struct {}
 
 func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
   // XXX these regexps are not complete...
-  regexpTreeWhole := regexp.MustCompile("^((\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n)+$")
-  regexpTreeLine := regexp.MustCompile("(\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n")
+  regexpTreeWhole := regexp.MustCompile("^(\\d{6} (blob|tree) [0-9a-f]{40}\\s[^\\n]+\\n)+$")
+  regexpTreeLine := regexp.MustCompile("^(\\d{6}) (blob|tree) ([0-9a-f]{40})\\s([^\\n]+)$")
   regexpCommit := regexp.MustCompile("^tree [0-9a-f]{40}")
   regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob := &types.Blob{}
@@ -31,9 +32,13 @@ func (s *Serializer) Unmarshal(data []byte) (*types.Blob, error) {
     fullText := bytes.NewBuffer(data).String()
     for _, line := range strings.Split(fullText, "\n") {
       submatches := regexpTreeLine.FindStringSubmatch(line)
-      hash, _ := hex.DecodeString(submatches[2])
-      entry := &types.TreeEntry{Hash: hash, Name: submatches[3], Flags: 0644}
-      blob.Tree.Entries = append(blob.Tree.Entries, entry)
+      // XXX we really just want to exclude the last empty line
+      if len(submatches) >= 3 {
+        hash, _ := hex.DecodeString(submatches[3])
+        flags, _ := strconv.ParseUint(submatches[1], 8, 32)
+        entry := &types.TreeEntry{Hash: hash, Name: submatches[4], Flags: uint32(flags)}
+        blob.Tree.Entries = append(blob.Tree.Entries, entry)
+      }
     }
   }
   if regexpCommit.Match(data) {
