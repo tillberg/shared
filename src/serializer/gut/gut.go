@@ -4,6 +4,8 @@ package gut
 import (
   "bufio"
   "bytes"
+  "errors"
+  "fmt"
   "regexp"
   "../../types"
 )
@@ -12,19 +14,21 @@ type Serializer struct {}
 
 func (s *Serializer) Unmarshal(bytes []byte) (*types.Blob, error) {
   // XXX these regexps are not complete...
-  regexpTree := regexp.MustCompile("^\\d{6} (blob|tree) [0-9a-f]{40}\t")
+  regexpTreeWhole := regexp.MustCompile("^((\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n)+$")
+  // regexpTreeLine := regexp.MustCompile("(\\d{6}) (blob|tree) ([0-9a-f]{40})\\t([^\\n]+)\\n")
   regexpCommit := regexp.MustCompile("^tree [0-9a-f]{40}")
   regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob := &types.Blob{}
   if regexpBranch.Match(bytes) {
 
-  } else if regexpTree.Match(bytes) {
+  } else if regexpTreeWhole.Match(bytes) {
 
   } else if regexpCommit.Match(bytes) {
 
   } else {
-    Blob.File = &types.File{Bytes: bytes}
+    blob.File = &types.File{Bytes: bytes}
   }
+  return nil, nil
 }
 
 func GetHexString(bytes []byte) string {
@@ -32,7 +36,7 @@ func GetHexString(bytes []byte) string {
 }
 
 func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
-  buffer := bytes.Buffer{}
+  buffer := &bytes.Buffer{}
   writer := bufio.NewWriter(buffer)
   if blob.Branch != nil {
     writer.Write([]byte(GetHexString(blob.Branch.Commit)))
@@ -49,7 +53,7 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
   } else if blob.File != nil {
     writer.Write(blob.File.Bytes)
   } else {
-    return nil, "No blob field defined"
+    return nil, errors.New("No blob field defined")
   }
   writer.Flush()
   return buffer.Bytes(), nil
