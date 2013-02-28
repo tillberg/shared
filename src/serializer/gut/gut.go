@@ -42,7 +42,9 @@ func Inflate(in []byte) ([]byte, error) {
 func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
   // XXX these regexps are not complete...
   // regexpTreeWhole := regexp.MustCompile(`^(\d{6} (blob|tree) [0-9a-f]{40}\s[^\n]+\n)+$`)
-  regexpTreeLine := regexp.MustCompile(`^(\d{6}) (blob|tree) ([0-9a-f]{40})\s([^\n]+)$`)
+  // XXX bug in regexp? [\s\S] 20 times is not the same as [\s\S]{20}
+  regexpTreeEntry := regexp.MustCompile(
+    `(\d+) (.+?)\000([\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S])`)
   regexpCommit := regexp.MustCompile(`^tree ([0-9a-f]{40})\n((parent [0-9a-f]{40}\n)*)((.|\n)+)$`)
   regexpCommitLine := regexp.MustCompile(`^(tree|parent) ([0-9a-f]{40})$`)
   // regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
@@ -60,16 +62,12 @@ func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
   data = data[len(submatchHeader[1]):]
   if t == "tree" {
     blob.Tree = &types.Tree{Entries: []*types.TreeEntry{}}
-    fullText := bytes.NewBuffer(data).String()
-    for _, line := range strings.Split(fullText, "\n") {
-      // XXX we really just want to exclude the last empty line
-      if line != "" {
-        submatches := regexpTreeLine.FindStringSubmatch(line)
-        hash, _ := hex.DecodeString(submatches[3])
-        flags, _ := strconv.ParseUint(submatches[1], 8, 32)
-        entry := &types.TreeEntry{Hash: hash, Name: submatches[4], Flags: uint32(flags)}
-        blob.Tree.Entries = append(blob.Tree.Entries, entry)
-      }
+    for _, submatches := range regexpTreeEntry.FindAllSubmatch(data, -1) {
+      flagsString := bytes.NewBuffer(submatches[1]).String()
+      flags, _ := strconv.ParseUint(flagsString, 8, 32)
+      nameString := bytes.NewBuffer(submatches[2]).String()
+      entry := &types.TreeEntry{Hash: submatches[3], Name: nameString, Flags: uint32(flags)}
+      blob.Tree.Entries = append(blob.Tree.Entries, entry)
     }
   } else if t == "commit" {
     fullText := bytes.NewBuffer(data).String()
@@ -103,14 +101,8 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
     t = "tree"
     for _, entry := range blob.Tree.Entries {
       flagsString := fmt.Sprintf("%06o", entry.Flags)
-      // e.g. 040000 is a tree.  we don't record the "tree"/"blob" flag here, but git does
-      typeString := "blob"
-      if entry.Flags >> 9 == 040 {
-        typeString = "tree"
-      }
-      hexHash := GetHexString(entry.Hash)
-      // flagsString := strings.Replace(strconv.FormatUint(uint64(entry.Flags), 8), " ", "0", -1)
-      writer.Write([]byte(fmt.Sprintf("%s %s %s\t%s\n", flagsString, typeString, hexHash, entry.Name)))
+      writer.Write([]byte(fmt.Sprintf("%s %s\000", flagsString, entry.Name)))
+      writer.Write(entry.Hash)
     }
   } else if blob.Commit != nil {
     t = "commit"
