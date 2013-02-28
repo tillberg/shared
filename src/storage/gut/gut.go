@@ -5,6 +5,7 @@ import (
   "crypto/sha1"
   "encoding/hex"
   "io/ioutil"
+  // "log"
   "os"
   "path"
   "../../types"
@@ -40,6 +41,7 @@ func (s *Storage) Put(data []byte) (hash types.Hash, err error) {
   _, err = os.Stat(cachePath)
   if err != nil {
     os.MkdirAll(path.Dir(cachePath), 0755)
+    // log.Printf("Saving %s to cache (%d bytes)", hex.EncodeToString(hash)[:16], len(data))
     err = ioutil.WriteFile(cachePath, data, 0644)
   }
   return hash, err

@@ -103,7 +103,7 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
     t = "tree"
     for _, entry := range blob.Tree.Entries {
       flagsString := fmt.Sprintf("%06o", entry.Flags)
-      // e.g. 040000 is a tree.  we don't record the "tree"/"blob" flag, but git does
+      // e.g. 040000 is a tree.  we don't record the "tree"/"blob" flag here, but git does
       typeString := "blob"
       if entry.Flags >> 9 == 040 {
         typeString = "tree"

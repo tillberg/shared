@@ -37,20 +37,23 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
   for {
     select {
       case fileUpdate := <- input:
-        filename := path.Base(fileUpdate.path)
-        if !fileUpdate.exists {
+        filename := path.Base(fileUpdate.Path)
+        if !fileUpdate.Exists {
           if children[filename] != nil {
             log.Printf("Removed %s", filename)
             delete(children, filename)
             updateSelf()
           }
         } else {
-          hash, err := storage.Configured().Put(fileUpdate.bytes)
+          blob := &types.Blob{File: &types.File{Bytes: fileUpdate.Bytes}}
+          data, err := serializer.Configured().Marshal(blob)
+          check(err)
+          hash, err := storage.Configured().Put(data)
           check(err)
           if children[filename] == nil || !bytes.Equal(hash, children[filename].Hash) {
             op := "Added"
             if children[filename] != nil { op = "Updated" }
-            log.Printf("%s %s %d %#x", op, filename, fileUpdate.size, GetShortHexString(hash))
+            log.Printf("%s %s (%d bytes) %s", op, filename, fileUpdate.Size, GetShortHexString(hash))
             children[filename] = &types.TreeEntry{Hash: hash}
             updateSelf()
           }
@@ -77,10 +80,10 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
 }
 
 type FileUpdate struct {
-  bytes  []byte
-  path   string
-  exists bool
-  size   int64
+  Bytes  []byte
+  Path   string
+  Exists bool
+  Size   int64
 }
 
 
@@ -94,14 +97,14 @@ func processChange(inputChannel chan FileEvent) {
     statbuf, err := os.Stat(event.path)
     if err != nil {
       // The file was deleted or otherwise doesn't exist
-      event.resultChannel <- FileUpdate{path: event.path, exists: false}
+      event.resultChannel <- FileUpdate{Path: event.path, Exists: false}
     } else {
       // Read the entire file and calculate its hash
       // XXX alternate path for large files?
       bytes, err := ioutil.ReadFile(event.path)
       check(err)
       // Send the update back to the tree's result channel
-      event.resultChannel <- FileUpdate{bytes: bytes, path: event.path, exists: true, size: statbuf.Size()}
+      event.resultChannel <- FileUpdate{Bytes: bytes, Path: event.path, Exists: true, Size: statbuf.Size()}
     }
   }
 }
