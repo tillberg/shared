@@ -10,8 +10,8 @@ import (
 )
 
 type Serializer interface {
-  Unmarshal(bytes []byte)   (*types.Blob, error)
-  Marshal(blob *types.Blob) ([]byte, error)
+  Unmarshal(bytes []byte)   (types.Blob, error)
+  Marshal(blob types.Blob) (types.Hash, []byte, error)
 }
 
 func Configured() Serializer {

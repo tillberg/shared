@@ -4,7 +4,6 @@ package blob
 import (
   "fmt"
   "log"
-  "../serializer"
   "../storage"
   "../types"
 )
@@ -25,10 +24,10 @@ func check(err interface{}) {
 //   previous *Commit
 // }
 
-func GetBlob(hash types.Hash) ([]byte, *types.Blob) {
-  bytes, err := storage.Configured().Get(hash)
+func GetBlob(hash types.Hash) types.Blob {
+  blob, err := storage.Configured().Get(hash)
   if err == nil {
-    log.Printf("Found %s in cache, %d bytes", GetShortHexString(hash), len(bytes))
+    log.Printf("Found %s in cache", GetShortHexString(hash))
   } else {
     responseChannel := make(chan types.Hash)
     // XXX this should be more ... targetted
@@ -38,15 +37,14 @@ func GetBlob(hash types.Hash) ([]byte, *types.Blob) {
     log.Printf("Requesting %s", GetShortHexString(hash))
     types.BlobRequestChannel <- types.BlobRequest{Hash: hash, ResponseChannel: responseChannel}
     // XXX what about failure?  timeout?
-    bytes = <-responseChannel
+    hash = <-responseChannel
     log.Printf("Received %s", GetShortHexString(hash))
-    storage.Configured().Put(bytes)
+    blob, err = storage.Configured().Get(hash)
   }
-  blob, err := serializer.Configured().Unmarshal(bytes)
   if err != nil {
     log.Fatal(err)
   }
-  return bytes, blob
+  return blob
 }
 
 // func (blob *Blob) Hash() []byte {

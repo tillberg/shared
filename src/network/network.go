@@ -14,6 +14,7 @@ import (
   "code.google.com/p/goprotobuf/proto"
   "github.com/tillberg/goconfig/conf"
   "../blob"
+  "../serializer"
   "../sharedpb"
   "../types"
 )
@@ -51,9 +52,11 @@ func GenerateSignature(bytes []byte) []byte  {
 }
 
 func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
-  bytes, _ := blob.GetBlob(hash)
+  blob := blob.GetBlob(hash)
+  hash, data, err := serializer.Configured().Marshal(blob)
+  check(err)
   // log.Printf("bytes: %d", len(bytes))
-  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: bytes}}
+  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: data}}
 }
 
 func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
@@ -154,7 +157,7 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
-      types.BlobReceiveChannel <- message.Object.Object
+      types.BlobReceiveChannel <- &types.File{Hash: message.Object.Hash, Bytes: message.Object.Object}
     } else if message.Branch != nil {
       branchUpdate := types.BranchStatus{Name: *message.Branch.Name, Hash:message.Branch.Hash}
       types.BranchUpdateChannel <- branchUpdate

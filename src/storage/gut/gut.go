@@ -2,12 +2,13 @@
 package gut
 
 import (
-  "crypto/sha1"
   "encoding/hex"
+  "fmt"
   "io/ioutil"
   // "log"
   "os"
   "path"
+  "../../serializer"
   "../../types"
 )
 
@@ -20,23 +21,20 @@ func (s *Storage) getCachePath(hash types.Hash) string {
   return path.Join(s.RootPath, "objects", hashString[:2], hashString[2:])
 }
 
-func calculateHash(bytes []byte) types.Hash {
-  h := sha1.New()
-  h.Write(bytes)
-  return h.Sum([]byte{})
-}
-
-func (s *Storage) Get(hash types.Hash) (data []byte, err error) {
+func (s *Storage) Get(hash types.Hash) (blob types.Blob, err error) {
   cachePath := s.getCachePath(hash)
   _, err = os.Stat(cachePath)
   if err == nil {
-    data, _ = ioutil.ReadFile(cachePath)
+    data, err := ioutil.ReadFile(cachePath)
+    if err == nil {
+      blob, err = serializer.Configured().Unmarshal(data)
+    }
   }
-  return data, err
+  return blob, err
 }
 
-func (s *Storage) Put(data []byte) (hash types.Hash, err error) {
-  hash = calculateHash(data)
+func (s *Storage) Put(blob types.Blob) (hash types.Hash, err error) {
+  hash, data, err := serializer.Configured().Marshal(blob)
   cachePath := s.getCachePath(hash)
   _, err = os.Stat(cachePath)
   if err != nil {
@@ -47,10 +45,13 @@ func (s *Storage) Put(data []byte) (hash types.Hash, err error) {
   return hash, err
 }
 
-func (*Storage) PutRef(name string, hash types.Hash) error {
+func (s *Storage) PutRef(name string, hash types.Hash) error {
+  refPath := path.Join(s.RootPath, "refs", "heads", name)
+  os.MkdirAll(path.Dir(refPath), 0755)
+  ioutil.WriteFile(refPath, []byte(fmt.Sprintf("%s\n", hex.EncodeToString(hash))), 0644)
   return nil
 }
 
-func (*Storage) GetRef(name string) (types.Hash, error) {
+func (s *Storage) GetRef(name string) (types.Hash, error) {
   return nil, nil
 }

@@ -5,6 +5,7 @@ import (
   "bufio"
   "bytes"
   "compress/zlib"
+  "crypto/sha1"
   "encoding/hex"
   "errors"
   "fmt"
@@ -39,24 +40,30 @@ func Inflate(in []byte) ([]byte, error) {
   return bufferUncompressed.Bytes(), nil
 }
 
-func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
-  // XXX these regexps are not complete...
+func calculateHash(bytes []byte) types.Hash {
+  h := sha1.New()
+  h.Write(bytes)
+  return h.Sum([]byte{})
+}
+
+func (s *Serializer) Unmarshal(data []byte) (blob types.Blob, err error) {
   // regexpTreeWhole := regexp.MustCompile(`^(\d{6} (blob|tree) [0-9a-f]{40}\s[^\n]+\n)+$`)
-  // XXX bug in regexp? [\s\S] 20 times is not the same as [\s\S]{20}
+  // XXX [\s\S] 20 times is not the same as [\s\S]{20}.  Probably because it's not UTF-8
+  // that we're decoding
   regexpTreeEntry := regexp.MustCompile(
     `(\d+) (.+?)\000([\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S])`)
   regexpCommit := regexp.MustCompile(`^tree ([0-9a-f]{40})\n((parent [0-9a-f]{40}\n)*)((.|\n)+)$`)
   regexpCommitLine := regexp.MustCompile(`^(tree|parent) ([0-9a-f]{40})$`)
   // regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
-  blob = &types.Blob{}
+  blob = types.Blob{}
   regexpHeader := regexp.MustCompile(`^((\w+) \d+\000)`)
   data, err = Inflate(data)
   if err != nil {
-    return nil, errors.New(fmt.Sprintf("Failed to inflate Unmarshal input (%d bytes): %s", len(data), err))
+    return blob, errors.New(fmt.Sprintf("Failed to inflate Unmarshal input (%d bytes): %s", len(data), err))
   }
   submatchHeader := regexpHeader.FindSubmatch(data)
   if submatchHeader == nil {
-    return nil, errors.New("Could not read git object header.")
+    return blob, errors.New("Could not read git object header.")
   }
   t := bytes.NewBuffer(submatchHeader[2]).String()
   data = data[len(submatchHeader[1]):]
@@ -93,15 +100,16 @@ func GetHexString(bytes []byte) string {
   return fmt.Sprintf("%#x", bytes)
 }
 
-func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
+func (s *Serializer) Marshal(blob types.Blob) (types.Hash, []byte, error) {
   buffer := &bytes.Buffer{}
   writer := bufio.NewWriter(buffer)
   var t string
   if blob.Tree != nil {
     t = "tree"
     for _, entry := range blob.Tree.Entries {
-      flagsString := fmt.Sprintf("%06o", entry.Flags)
-      writer.Write([]byte(fmt.Sprintf("%s %s\000", flagsString, entry.Name)))
+      flagsString := fmt.Sprintf("%o", entry.Flags)
+      writer.Write([]byte(fmt.Sprintf("%s %s", flagsString, entry.Name)))
+      writer.Write([]byte{0})
       writer.Write(entry.Hash)
     }
   } else if blob.Commit != nil {
@@ -115,7 +123,7 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
     t = "blob"
     writer.Write(blob.File.Bytes)
   } else {
-    return nil, errors.New("No blob field defined")
+    return nil, nil, errors.New("No blob field defined")
   }
   writer.Flush()
   data := buffer.Bytes()
@@ -125,5 +133,7 @@ func (s *Serializer) Marshal(blob *types.Blob) ([]byte, error) {
   w.Write([]byte(fmt.Sprintf("%s %d\000", t, len(data))))
   w.Write(data)
   w.Flush()
-  return Deflate(b.Bytes()), nil
+  data2 := b.Bytes()
+  hash := calculateHash(data2)
+  return hash, Deflate(data2), nil
 }

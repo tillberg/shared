@@ -54,12 +54,12 @@ func ArbitBlobRequests() {
           subscribers[hashString] = []chan types.Hash{}
         }
         subscribers[hashString] = append(subscribers[hashString], request.ResponseChannel)
-      case bytes := <-types.BlobReceiveChannel:
-        hash, err := storage.Configured().Put(bytes)
+      case file := <-types.BlobReceiveChannel:
+        hash, err := storage.Configured().Put(types.Blob{File: file})
         check(err)
         // log.Printf("Forwarding %s", GetHexString(object.Hash()))
         for _, subscriber := range subscribers[GetHexString(hash)] {
-          subscriber <- bytes
+          subscriber <- file.Hash
         }
     }
   }
@@ -75,7 +75,7 @@ func CommitIsNew(commit types.Hash, commitOld types.Hash) bool {
     }
     stack = stack[1:]
     allCommits = append(allCommits, next)
-    _, commitBlob := blob.GetBlob(next)
+    commitBlob := blob.GetBlob(next)
     if commitBlob.Commit == nil {
       log.Printf("%#v", commitBlob)
       log.Fatalf("Could not find commit %s", blob.GetShortHexString(next))

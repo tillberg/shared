@@ -9,8 +9,8 @@ import (
 )
 
 type Storage interface {
-  Get(hash types.Hash) ([]byte, error)
-  Put(bytes []byte)    (types.Hash, error)
+  Get(hash types.Hash) (types.Blob, error)
+  Put(blob types.Blob) (types.Hash, error)
   PutRef(name string, hash types.Hash) error
   GetRef(name string) (types.Hash, error)
 }

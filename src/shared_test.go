@@ -46,7 +46,7 @@ func TestContents(t* testing.T) {
   AssertContents(t, timeout, "/tmp/sync2/testfile", "hello")
 }
 
-func TestTwo(t* testing.T) {
+func TestTwoBasic(t* testing.T) {
   setup := test.SetUp()
   defer test.TearDown(setup)
   WriteFile("/tmp/sync1/testfile", "hello")

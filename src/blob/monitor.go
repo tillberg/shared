@@ -9,7 +9,6 @@ import (
   "path"
   "time"
   "github.com/howeyc/fsnotify"
-  "../serializer"
   "../storage"
   "../types"
 )
@@ -24,13 +23,11 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
     for name, treeEntry := range children {
       tree.Entries = append(tree.Entries, &types.TreeEntry{
         Hash: treeEntry.Hash,
-        Flags: uint32(0644),
+        Flags: uint32(0100644),
         Name: name,
       })
     }
-    bytes, err := serializer.Configured().Marshal(&types.Blob{Tree: tree})
-    check(err)
-    hash, err := storage.Configured().Put(bytes)
+    hash, err := storage.Configured().Put(types.Blob{Tree: tree})
     check(err)
     revisionChannel <- hash
   }
@@ -45,10 +42,8 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
             updateSelf()
           }
         } else {
-          blob := &types.Blob{File: &types.File{Bytes: fileUpdate.Bytes}}
-          data, err := serializer.Configured().Marshal(blob)
-          check(err)
-          hash, err := storage.Configured().Put(data)
+          blob := types.Blob{File: &types.File{Bytes: fileUpdate.Bytes}}
+          hash, err := storage.Configured().Put(blob)
           check(err)
           if children[filename] == nil || !bytes.Equal(hash, children[filename].Hash) {
             op := "Added"
@@ -60,17 +55,17 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
         }
       case mergeHash := <-mergeChannel:
         // This is not a merge but a destructive fast-forward
-        _, commitBlob := GetBlob(mergeHash)
+        commitBlob := GetBlob(mergeHash)
         if commitBlob.Commit == nil {
           log.Fatalf("Tried to merge commit %s but got %v instead", GetShortHexString(mergeHash), commitBlob)
         }
-        _, treeBlob := GetBlob(commitBlob.Commit.Tree)
+        treeBlob := GetBlob(commitBlob.Commit.Tree)
         tree := treeBlob.Tree
         log.Printf("Merging %s into tree (%d entries)", GetShortHexString(mergeHash), len(tree.Entries))
         children = map[string]*types.TreeEntry{}
         for _, entry := range tree.Entries {
           children[entry.Name] = entry
-          _, fileblob := GetBlob(entry.Hash)
+          fileblob := GetBlob(entry.Hash)
           file := fileblob.File
           ioutil.WriteFile(path.Join(rootPath, entry.Name), file.Bytes, 0644)
           log.Printf("Unpacked %s, %s", entry.Name, GetShortHexString(entry.Hash))
@@ -156,6 +151,10 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
   subscription := types.BranchSubscription{Name: "master", ResponseChannel: branchReceiveChannel}
   types.BranchSubscribeChannel <- subscription
   var lastCommitHash types.Hash
+  updateHead := func(hash types.Hash) {
+    lastCommitHash = hash
+    storage.Configured().PutRef("master", hash)
+  }
   for {
     select {
       case newHash := <-revisionChannel:
@@ -167,16 +166,15 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
         if lastCommitHash != nil {
           commit.Parents = append(commit.Parents, lastCommitHash)
         }
-        commitBytes, err := serializer.Configured().Marshal(&types.Blob{Commit: commit})
-        check(err)
-        commitHash, err := storage.Configured().Put(commitBytes)
+        commitHash, err := storage.Configured().Put(types.Blob{Commit: commit})
         check(err)
         log.Printf("New branch revision: %s", GetShortHexString(commitHash))
-        lastCommitHash = commitHash
+        updateHead(commitHash)
         types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash}
       case newBranchStatus := <-branchReceiveChannel:
         if !bytes.Equal(commit.Tree, newBranchStatus.Hash) {
           // log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
+          updateHead(newBranchStatus.Hash)
           mergeChannel <- newBranchStatus.Hash
         }
     }
