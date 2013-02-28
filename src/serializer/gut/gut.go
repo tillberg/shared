@@ -25,18 +25,18 @@ func Deflate(in []byte) []byte {
   return b.Bytes()
 }
 
-func Inflate(in []byte) []byte {
+func Inflate(in []byte) ([]byte, error) {
   b := bytes.NewBuffer(in)
   r, err := zlib.NewReader(b)
   if err != nil {
-    panic(err)
+    return nil, err
   }
   bufferUncompressed := bytes.Buffer{}
   writerUncompressed := bufio.NewWriter(&bufferUncompressed)
   io.Copy(writerUncompressed, r)
   defer r.Close()
   writerUncompressed.Flush()
-  return bufferUncompressed.Bytes()
+  return bufferUncompressed.Bytes(), nil
 }
 
 func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
@@ -48,10 +48,10 @@ func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
   // regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob = &types.Blob{}
   regexpHeader := regexp.MustCompile(`^((\w+) \d+\000)`)
-  data = Inflate(data)
-  // if err != nil {
-  //   return nil, err
-  // }
+  data, err = Inflate(data)
+  if err != nil {
+    return nil, err
+  }
   submatchHeader := regexpHeader.FindSubmatch(data)
   if submatchHeader == nil {
     return nil, errors.New("Could not read git object header.")

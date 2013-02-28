@@ -83,7 +83,8 @@ func ExampleSerializer_Marshal_Tree() {
     &types.TreeEntry{Hash: hash2, Name: "susan", Flags: 0123456},
   }
   data, err := s.Marshal(&types.Blob{Tree: &types.Tree{Entries: entries}})
-  data = Inflate(data)
+  check(err)
+  data, err = Inflate(data)
   check(err)
   text := bytes.NewBuffer(data).String()
   text = strings.Replace(text, "\t", "  ", -1)
@@ -100,7 +101,8 @@ func TestSerializer_Marshal_Tree(t *testing.T) {
   check(err)
   data, err := s.Marshal(blob)
   check(err)
-  data = Inflate(data)
+  data, err = Inflate(data)
+  check(err)
   text := bytes.NewBuffer(data).String()
   if text != exampleTreeString() {
     t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleTreeString())
@@ -112,7 +114,9 @@ func TestSerializer_Marshal_Commit(t *testing.T) {
   blob, err := s.Unmarshal(Deflate([]byte(exampleCommitString())))
   check(err)
   data, err := s.Marshal(blob)
-  data = Inflate(data)
+  check(err)
+  data, err = Inflate(data)
+  check(err)
   text := bytes.NewBuffer(data).String()
   if text != exampleCommitString() {
     t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleCommitString())
