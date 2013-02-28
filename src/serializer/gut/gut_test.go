@@ -15,27 +15,19 @@ func check(err error) {
   }
 }
 
-func ExampleSerializer_Unmarshal_Branch() {
-  s := Serializer{}
-  blob, err := s.Unmarshal([]byte("5beebcdfedd26e654b88d2ce2d06fc1825e809d6"))
-  check(err)
-  fmt.Printf("%+v\n", blob.Branch)
-  fmt.Printf("%+v\n", blob.File)
-  // Output:
-  // &{Name: Commit:[91 238 188 223 237 210 110 101 75 136 210 206 45 6 252 24 37 232 9 214]}
-  // &{Bytes:[53 98 101 101 98 99 100 102 101 100 100 50 54 101 54 53 52 98 56 56 100 50 99 101 50 100 48 54 102 99 49 56 50 53 101 56 48 57 100 54]}
+func exampleTreeString() string {
+  s := (
+    "100644 blob ce770ef0fd9f274ea9e102910396d57956edd325\t.gitignore\n" +
+    "100755 blob 094dce1db4f2dc0b25068a61fab98c746e5b4834\tdev.sh\n" +
+    "040000 tree 6116b1ca7b8e616cd3997b4acac9e5731b34073e\tproto\n" +
+    "040000 tree c78ce6725d1cda9b01fd4ad4701f5776ed27f4a0\tsrc\n" +
+    "432176 blob 8f2a73dfc460145d671908bd6497cc6ff765d9d3\ttest.sh\n")
+  return fmt.Sprintf("tree %d\000%s", len(s), s)
 }
-
-var exampleTreeString = (
-  "100644 blob ce770ef0fd9f274ea9e102910396d57956edd325\t.gitignore\n" +
-  "100755 blob 094dce1db4f2dc0b25068a61fab98c746e5b4834\tdev.sh\n" +
-  "040000 tree 6116b1ca7b8e616cd3997b4acac9e5731b34073e\tproto\n" +
-  "040000 tree c78ce6725d1cda9b01fd4ad4701f5776ed27f4a0\tsrc\n" +
-  "432176 blob 8f2a73dfc460145d671908bd6497cc6ff765d9d3\ttest.sh\n")
 
 func ExampleSerializer_Unmarshal_Tree() {
   s := Serializer{}
-  blob, err := s.Unmarshal([]byte(exampleTreeString))
+  blob, err := s.Unmarshal(Deflate([]byte(exampleTreeString())))
   check(err)
   fmt.Printf("%+v\n", blob.Tree.Entries[0])
   fmt.Printf("%+v\n", blob.Tree.Entries[1])
@@ -52,18 +44,23 @@ func ExampleSerializer_Unmarshal_Tree() {
   // true
 }
 
-var exampleCommitString = `tree c68f49cedb6379a88f36a20ed5c6ca8bf735e73b
+func exampleCommitString() string {
+  s := (
+    `tree c68f49cedb6379a88f36a20ed5c6ca8bf735e73b
 parent 5beebcdfedd26e654b88d2ce2d06fc1825e809d6
 parent e673cec71f4dbbe6e765f3f448f705a4c78d157f
 author Dan Tillberg <dan@tillberg.us> 1361048340 +0000
 committer Dan Tillberg <dan@tillberg.us> 1361048340 +0000
 
 Read all files in folder on startup
-`
+`)
+  return fmt.Sprintf("commit %d\000%s", len(s), s)
+}
+
 
 func ExampleSerializer_Unmarshal_Commit() {
   s := Serializer{}
-  blob, err := s.Unmarshal([]byte(exampleCommitString))
+  blob, err := s.Unmarshal(Deflate([]byte(exampleCommitString())))
   check(err)
   fmt.Printf("%+v\n", blob.Commit.Tree)
   fmt.Printf("%+v\n", blob.Commit.Parents)
@@ -86,32 +83,38 @@ func ExampleSerializer_Marshal_Tree() {
     &types.TreeEntry{Hash: hash2, Name: "susan", Flags: 0123456},
   }
   data, err := s.Marshal(&types.Blob{Tree: &types.Tree{Entries: entries}})
+  data = Inflate(data)
   check(err)
   text := bytes.NewBuffer(data).String()
-  fmt.Println(strings.Replace(text, "\t", "  ", -1))
+  text = strings.Replace(text, "\t", "  ", -1)
+  text = strings.Replace(text, "\000", "{ZERO}", -1)
+  fmt.Println(text)
   // Output:
-  // 040123 tree 5beebcdfedd26e654b88d2ce2d06fc1825e809d6  bob
+  // tree 116{ZERO}040123 tree 5beebcdfedd26e654b88d2ce2d06fc1825e809d6  bob
   // 123456 blob e673cec71f4dbbe6e765f3f448f705a4c78d157f  susan
 }
 
 func TestSerializer_Marshal_Tree(t *testing.T) {
   s := Serializer{}
-  blob, err := s.Unmarshal([]byte(exampleTreeString))
+  blob, err := s.Unmarshal(Deflate([]byte(exampleTreeString())))
   check(err)
   data, err := s.Marshal(blob)
+  check(err)
+  data = Inflate(data)
   text := bytes.NewBuffer(data).String()
-  if text != exampleTreeString {
-    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleTreeString)
+  if text != exampleTreeString() {
+    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleTreeString())
   }
 }
 
 func TestSerializer_Marshal_Commit(t *testing.T) {
   s := Serializer{}
-  blob, err := s.Unmarshal([]byte(exampleCommitString))
+  blob, err := s.Unmarshal(Deflate([]byte(exampleCommitString())))
   check(err)
   data, err := s.Marshal(blob)
+  data = Inflate(data)
   text := bytes.NewBuffer(data).String()
-  if text != exampleCommitString {
-    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleCommitString)
+  if text != exampleCommitString() {
+    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleCommitString())
   }
 }

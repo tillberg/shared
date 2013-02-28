@@ -157,7 +157,7 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
     select {
       case newHash := <-revisionChannel:
         commit = &types.Commit{
-          Text: "awesome",
+          Text: "author Bob <bob@a.b> 1361949353 +0000\ncommitter Bob <bob@a.b> 1361949353 +0000\nawesome\n",
           Tree: newHash,
           Parents: []types.Hash{}, // this needs the previous *commit* hash
         }
