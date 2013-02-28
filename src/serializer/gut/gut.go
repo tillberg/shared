@@ -50,7 +50,7 @@ func (s *Serializer) Unmarshal(data []byte) (blob *types.Blob, err error) {
   regexpHeader := regexp.MustCompile(`^((\w+) \d+\000)`)
   data, err = Inflate(data)
   if err != nil {
-    return nil, err
+    return nil, errors.New(fmt.Sprintf("Failed to inflate Unmarshal input (%d bytes): %s", len(data), err))
   }
   submatchHeader := regexpHeader.FindSubmatch(data)
   if submatchHeader == nil {

@@ -43,7 +43,9 @@ func GetBlob(hash types.Hash) ([]byte, *types.Blob) {
     storage.Configured().Put(bytes)
   }
   blob, err := serializer.Configured().Unmarshal(bytes)
-  check(err)
+  if err != nil {
+    log.Fatal(err)
+  }
   return bytes, blob
 }
 

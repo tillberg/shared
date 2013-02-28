@@ -122,3 +122,30 @@ func TestSerializer_Marshal_Commit(t *testing.T) {
     t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleCommitString())
   }
 }
+
+func ExampleSerializer_Marshal_Blob() {
+  s := Serializer{}
+  origText := "The answer is 42"
+  data, err := s.Marshal(&types.Blob{File: &types.File{Bytes: []byte(origText)}})
+  check(err)
+  blob, err := s.Unmarshal(data)
+  text := bytes.NewBuffer(blob.File.Bytes).String()
+  fmt.Print(text)
+  // Output:
+  // The answer is 42
+}
+
+func TestSerializer_Marshal_Blob(t *testing.T) {
+  s := Serializer{}
+  origText := "blob 5\000hello"
+  blob, err := s.Unmarshal(Deflate([]byte(origText)))
+  check(err)
+  data, err := s.Marshal(blob)
+  check(err)
+  data, err = Inflate(data)
+  check(err)
+  text := bytes.NewBuffer(data).String()
+  if text != origText {
+    t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, origText)
+  }
+}
