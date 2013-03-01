@@ -30,12 +30,6 @@ func GetHexString(bytes []byte) string {
   return fmt.Sprintf("%#x", bytes)
 }
 
-func check(err interface{}) {
-  if err != nil {
-    log.Fatal(err)
-  }
-}
-
 func WriteUvarint(writer *bufio.Writer, number uint64) {
   buf := make([]byte, 8)
   numBytes := binary.PutUvarint(buf, number)
@@ -55,7 +49,7 @@ func GenerateSignature(bytes []byte) []byte  {
 func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
   blob := blob.GetBlob(hash)
   data, err := serializer.Configured().Marshal(blob)
-  check(err)
+  if err != nil { log.Fatal(err) }
   compressed := storage.Configured().Deflate(data)
   // log.Printf("bytes: %d", len(bytes))
   dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: compressed}}
@@ -66,17 +60,17 @@ func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
   message.Timestamp = &now
   // log.Printf("Going to send %s", message.MessageString())
   messageBytes, err := proto.Marshal(message)
-  check(err)
+  if err != nil { log.Fatal(err) }
   numMessageBytes := uint64(len(messageBytes))
   preamble := &sharedpb.Preamble{Length: &numMessageBytes}
   preamble.Signature = GenerateSignature(messageBytes)
   preambleBytes, err := proto.Marshal(preamble)
-  check(err)
+  if err != nil { log.Fatal(err) }
   WriteUvarint(writer, uint64(len(preambleBytes)))
   _, err = writer.Write(preambleBytes)
-  check(err)
+  if err != nil { log.Fatal(err) }
   _, err = writer.Write(messageBytes)
-  check(err)
+  if err != nil { log.Fatal(err) }
   writer.Flush()
 }
 
@@ -84,7 +78,7 @@ func SendSingleMessage(message *sharedpb.Message, address string) {
   start := time.Now()
   for {
     remoteAddr, err := net.ResolveTCPAddr("tcp", address)
-    check(err)
+    if err != nil { log.Fatal(err) }
     conn, err := net.DialTCP("tcp", nil, remoteAddr)
     if err != nil {
       if time.Since(start) > time.Second {
@@ -101,28 +95,30 @@ func SendSingleMessage(message *sharedpb.Message, address string) {
 
 func ReceiveMessage(reader *bufio.Reader) (*sharedpb.Message, bool) {
   preambleSize, err := binary.ReadUvarint(reader)
-  check(err)
+  if err != nil { log.Println(err); return nil, false }
   bufPreamble := make([]byte, preambleSize)
   _, err = io.ReadFull(reader, bufPreamble)
-  check(err)
+  if err != nil { log.Println(err); return nil, false }
   preamble := &sharedpb.Preamble{}
   err = proto.Unmarshal(bufPreamble, preamble)
-  check(err)
+  if err != nil { log.Println(err); return nil, false }
 
   bufMessage := make([]byte, *preamble.Length)
   _, err = io.ReadFull(reader, bufMessage)
-  check(err)
+  if err != nil { log.Println(err); return nil, false }
   message := &sharedpb.Message{}
   err = proto.Unmarshal(bufMessage, message)
-  check(err)
+  if err != nil { log.Println(err); return nil, false }
 
-  valid := false
   if preamble.Signature != nil {
     correct := GenerateSignature(bufMessage)
-    valid = bytes.Equal(preamble.Signature, correct)
+    if !bytes.Equal(preamble.Signature, correct) {
+      log.Println("Invalid message received")
+      return nil, false
+    }
   }
 
-  return message, valid
+  return message, true
 }
 
 func SubscribeToBranch(name string, outbox chan *sharedpb.Message) {
@@ -152,17 +148,15 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   reader := bufio.NewReader(conn)
   for {
     message, valid := ReceiveMessage(reader)
-    if !valid {
-      log.Fatal("Invalid message received")
-    }
+    if !valid { return }
     log.Printf("Received %s", message.MessageString())
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
       data, err := storage.Configured().Inflate(message.Object.Object)
-      check(err)
+      if err != nil { log.Fatal(err) }
       blob, err := serializer.Configured().Unmarshal(data)
-      check(err)
+      if err != nil { log.Fatal(err) }
       types.BlobReceiveChannel <- blob
     } else if message.Branch != nil {
       branchUpdate := types.BranchStatus{Name: *message.Branch.Name, Hash:message.Branch.Hash}
@@ -189,7 +183,7 @@ func makeConnection(address string) {
   start := time.Now()
   for {
     remoteAddr, err := net.ResolveTCPAddr("tcp", address)
-    check(err)
+    if err != nil { log.Fatal(err) }
     conn, err := net.DialTCP("tcp", nil, remoteAddr)
     if err != nil {
       if time.Since(start) > time.Second {
@@ -221,9 +215,9 @@ func ListenForConnections(ln *net.TCPListener) {
 
 func Start(listenPort int) {
   listen_addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", listenPort))
-  check(err)
+  if err != nil { log.Fatal(err) }
   ln, err := net.ListenTCP("tcp", listen_addr)
-  check(err)
+  if err != nil { log.Fatal(err) }
   defer ln.Close()
   log.Printf("Listening on port %d.", listenPort)
   // XXX omg kludge.  Need to figure out how to properly negotiate
@@ -233,7 +227,7 @@ func Start(listenPort int) {
 
 func init() {
   config, err := conf.ReadConfigFile("shared.ini")
-  check(err)
+  if err != nil { log.Fatal(err) }
   apikey, err = config.GetString("main", "apikey")
-  check(err)
+  if err != nil { log.Fatal(err) }
 }
