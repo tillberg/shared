@@ -4,6 +4,7 @@ import (
   "bytes"
   "encoding/hex"
   "fmt"
+  "strings"
   "testing"
   "../../types"
 )
@@ -12,6 +13,12 @@ func check(err error) {
   if err != nil {
     panic(err)
   }
+}
+
+func FormatString(b []byte) string {
+  s := bytes.NewBuffer(b).String()
+  s = strings.Replace(s, "\t", "  ", -1)
+  return strings.Replace(s, "\000", "{ZERO}", -1)
 }
 
 // func exampleTreeString() string {
@@ -26,15 +33,19 @@ func check(err error) {
 
 // func ExampleSerializer_Unmarshal_Tree() {
 //   s := Serializer{}
-//   blob, err := s.Unmarshal(Deflate([]byte(exampleTreeString())))
+//   blob, err := s.Unmarshal([]byte(exampleTreeString()))
 //   check(err)
-//   fmt.Printf("%+v\n", blob.Tree.Entries[0])
-//   fmt.Printf("%+v\n", blob.Tree.Entries[1])
-//   fmt.Printf("%+v\n", blob.Tree.Entries[2])
-//   fmt.Printf("%+v\n", blob.Tree.Entries[3])
-//   fmt.Printf("%+v\n", blob.Tree.Entries[4])
-//   fmt.Println(blob.Tree.Entries[4].Flags == 0432176)
+//   fmt.Println(len(blob.Tree.Entries))
+//   if len(blob.Tree.Entries) == 5 {
+//     fmt.Printf("%+v\n", blob.Tree.Entries[0])
+//     fmt.Printf("%+v\n", blob.Tree.Entries[1])
+//     fmt.Printf("%+v\n", blob.Tree.Entries[2])
+//     fmt.Printf("%+v\n", blob.Tree.Entries[3])
+//     fmt.Printf("%+v\n", blob.Tree.Entries[4])
+//     fmt.Println(blob.Tree.Entries[4].Flags == 0432176)
+//   }
 //   // Output:
+//   // 5
 //   // &{Hash:[206 119 14 240 253 159 39 78 169 225 2 145 3 150 213 121 86 237 211 37] Name:.gitignore Flags:33188}
 //   // &{Hash:[9 77 206 29 180 242 220 11 37 6 138 97 250 185 140 116 110 91 72 52] Name:dev.sh Flags:33261}
 //   // &{Hash:[97 22 177 202 123 142 97 108 211 153 123 74 202 201 229 115 27 52 7 62] Name:proto Flags:16384}
@@ -59,7 +70,7 @@ Read all files in folder on startup
 
 func ExampleSerializer_Unmarshal_Commit() {
   s := Serializer{}
-  blob, err := s.Unmarshal(Deflate([]byte(exampleCommitString())))
+  blob, err := s.Unmarshal([]byte(exampleCommitString()))
   check(err)
   fmt.Printf("%+v\n", blob.Commit.Tree)
   fmt.Printf("%+v\n", blob.Commit.Parents)
@@ -81,12 +92,8 @@ func ExampleSerializer_Marshal_Tree() {
     &types.TreeEntry{Hash: hash, Name: "bob", Flags: 040123},
     &types.TreeEntry{Hash: hash2, Name: "susan", Flags: 0123456},
   }
-  data, err := s.Marshal(&types.Blob{Tree: &types.Tree{Entries: entries}})
+  data, err := s.Marshal(types.Blob{Tree: &types.Tree{Entries: entries}})
   check(err)
-  // inflated, err := Inflate(data)
-  // check(err)
-  // fmt.Println(bytes.NewBuffer(inflated).String())
-  // fmt.Println(inflated)
   blob, err := s.Unmarshal(data)
   check(err)
   fmt.Println(len(blob.Tree.Entries))
@@ -102,13 +109,12 @@ func ExampleSerializer_Marshal_Tree() {
 
 // func TestSerializer_Marshal_Tree(t *testing.T) {
 //   s := Serializer{}
-//   blob, err := s.Unmarshal(Deflate([]byte(exampleTreeString())))
+//   blob, err := s.Unmarshal([]byte(exampleTreeString()))
 //   check(err)
 //   data, err := s.Marshal(blob)
 //   check(err)
-//   data, err = Inflate(data)
-//   check(err)
 //   text := bytes.NewBuffer(data).String()
+//   fmt.Println(blob.Tree)
 //   if text != exampleTreeString() {
 //     t.Fatalf("Got this:\n%s\nExpected this:\n%s\n", text, exampleTreeString())
 //   }
@@ -116,11 +122,9 @@ func ExampleSerializer_Marshal_Tree() {
 
 func TestSerializer_Marshal_Commit(t *testing.T) {
   s := Serializer{}
-  blob, err := s.Unmarshal(Deflate([]byte(exampleCommitString())))
+  blob, err := s.Unmarshal([]byte(exampleCommitString()))
   check(err)
   data, err := s.Marshal(blob)
-  check(err)
-  data, err = Inflate(data)
   check(err)
   text := bytes.NewBuffer(data).String()
   if text != exampleCommitString() {
@@ -131,11 +135,10 @@ func TestSerializer_Marshal_Commit(t *testing.T) {
 func ExampleSerializer_Marshal_Blob() {
   s := Serializer{}
   origText := "The answer is 42"
-  data, err := s.Marshal(&types.Blob{File: &types.File{Bytes: []byte(origText)}})
+  data, err := s.Marshal(types.Blob{File: &types.File{Bytes: []byte(origText)}})
   check(err)
   blob, err := s.Unmarshal(data)
-  text := bytes.NewBuffer(blob.File.Bytes).String()
-  fmt.Print(text)
+  fmt.Print(FormatString(blob.File.Bytes))
   // Output:
   // The answer is 42
 }
@@ -143,11 +146,9 @@ func ExampleSerializer_Marshal_Blob() {
 func TestSerializer_Marshal_Blob(t *testing.T) {
   s := Serializer{}
   origText := "blob 5\000hello"
-  blob, err := s.Unmarshal(Deflate([]byte(origText)))
+  blob, err := s.Unmarshal([]byte(origText))
   check(err)
   data, err := s.Marshal(blob)
-  check(err)
-  data, err = Inflate(data)
   check(err)
   text := bytes.NewBuffer(data).String()
   if text != origText {

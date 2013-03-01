@@ -53,7 +53,7 @@ func GenerateSignature(bytes []byte) []byte  {
 
 func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
   blob := blob.GetBlob(hash)
-  hash, data, err := serializer.Configured().Marshal(blob)
+  data, err := serializer.Configured().Marshal(blob)
   check(err)
   // log.Printf("bytes: %d", len(bytes))
   dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: data}}

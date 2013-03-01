@@ -4,12 +4,9 @@ package gut
 import (
   "bufio"
   "bytes"
-  "compress/zlib"
-  "crypto/sha1"
   "encoding/hex"
   "errors"
   "fmt"
-  "io"
   "regexp"
   "strconv"
   "strings"
@@ -18,49 +15,14 @@ import (
 
 type Serializer struct {}
 
-func Deflate(in []byte) []byte {
-  var b bytes.Buffer
-  w := zlib.NewWriter(&b)
-  w.Write(in)
-  w.Close()
-  return b.Bytes()
-}
-
-func Inflate(in []byte) ([]byte, error) {
-  b := bytes.NewBuffer(in)
-  r, err := zlib.NewReader(b)
-  if err != nil {
-    return nil, err
-  }
-  bufferUncompressed := bytes.Buffer{}
-  writerUncompressed := bufio.NewWriter(&bufferUncompressed)
-  io.Copy(writerUncompressed, r)
-  defer r.Close()
-  writerUncompressed.Flush()
-  return bufferUncompressed.Bytes(), nil
-}
-
-func calculateHash(bytes []byte) types.Hash {
-  h := sha1.New()
-  h.Write(bytes)
-  return h.Sum([]byte{})
-}
-
 func (s *Serializer) Unmarshal(data []byte) (blob types.Blob, err error) {
   // regexpTreeWhole := regexp.MustCompile(`^(\d{6} (blob|tree) [0-9a-f]{40}\s[^\n]+\n)+$`)
-  // XXX [\s\S] 20 times is not the same as [\s\S]{20}.  Probably because it's not UTF-8
-  // that we're decoding
-  regexpTreeEntry := regexp.MustCompile(
-    `(\d+) (.+?)\000([\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S][\s\S])`)
+  regexpTreeEntry := regexp.MustCompile(`^(\d+) (.+?)\000`)
   regexpCommit := regexp.MustCompile(`^tree ([0-9a-f]{40})\n((parent [0-9a-f]{40}\n)*)((.|\n)+)$`)
   regexpCommitLine := regexp.MustCompile(`^(tree|parent) ([0-9a-f]{40})$`)
   // regexpBranch := regexp.MustCompile("^[0-9a-f]{40}$")
   blob = types.Blob{}
   regexpHeader := regexp.MustCompile(`^((\w+) \d+\000)`)
-  data, err = Inflate(data)
-  if err != nil {
-    return blob, errors.New(fmt.Sprintf("Failed to inflate Unmarshal input (%d bytes): %s", len(data), err))
-  }
   submatchHeader := regexpHeader.FindSubmatch(data)
   if submatchHeader == nil {
     return blob, errors.New("Could not read git object header.")
@@ -69,11 +31,23 @@ func (s *Serializer) Unmarshal(data []byte) (blob types.Blob, err error) {
   data = data[len(submatchHeader[1]):]
   if t == "tree" {
     blob.Tree = &types.Tree{Entries: []*types.TreeEntry{}}
-    for _, submatches := range regexpTreeEntry.FindAllSubmatch(data, -1) {
-      flagsString := bytes.NewBuffer(submatches[1]).String()
+    for {
+      submatch := regexpTreeEntry.FindSubmatch(data);
+      if submatch == nil {
+        if len(data) != 0 {
+          err = errors.New(fmt.Sprintf("Error reading tree.  %d entries found, %d bytes remain.",
+            len(blob.Tree.Entries), len(data)))
+        }
+        break
+      }
+      // Remove the bytes from data that we just matched
+      data = data[len(submatch[0]):]
+      flagsString := bytes.NewBuffer(submatch[1]).String()
       flags, _ := strconv.ParseUint(flagsString, 8, 32)
-      nameString := bytes.NewBuffer(submatches[2]).String()
-      entry := &types.TreeEntry{Hash: submatches[3], Name: nameString, Flags: uint32(flags)}
+      nameString := bytes.NewBuffer(submatch[2]).String()
+      // The next 20 bytes in data are the 160-bit SHA1 hash
+      entry := &types.TreeEntry{Hash: data[:20], Name: nameString, Flags: uint32(flags)}
+      data = data[20:]
       blob.Tree.Entries = append(blob.Tree.Entries, entry)
     }
   } else if t == "commit" {
@@ -100,7 +74,7 @@ func GetHexString(bytes []byte) string {
   return fmt.Sprintf("%#x", bytes)
 }
 
-func (s *Serializer) Marshal(blob types.Blob) (types.Hash, []byte, error) {
+func (s *Serializer) Marshal(blob types.Blob) ([]byte, error) {
   buffer := &bytes.Buffer{}
   writer := bufio.NewWriter(buffer)
   var t string
@@ -123,17 +97,15 @@ func (s *Serializer) Marshal(blob types.Blob) (types.Hash, []byte, error) {
     t = "blob"
     writer.Write(blob.File.Bytes)
   } else {
-    return nil, nil, errors.New("No blob field defined")
+    return nil, errors.New("No blob field defined")
   }
   writer.Flush()
   data := buffer.Bytes()
   b := &bytes.Buffer{}
   w := bufio.NewWriter(b)
-  // Write header
+  // Write header, and rewrite the actual data after it
   w.Write([]byte(fmt.Sprintf("%s %d\000", t, len(data))))
   w.Write(data)
   w.Flush()
-  data2 := b.Bytes()
-  hash := calculateHash(data2)
-  return hash, Deflate(data2), nil
+  return b.Bytes(), nil
 }
