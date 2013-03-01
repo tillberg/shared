@@ -15,7 +15,8 @@ import (
 
 var processChannel = make(chan FileEvent, 100) // debouncing
 
-func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types.Hash, revisionChannel chan types.Hash) {
+func MonitorTree(rootPath string, fileUpdateChannel chan FileUpdate,
+                 mergeChannel chan types.Hash, revisionChannel chan types.Hash) {
   // XXX ideally, this would be a B-Tree with distributed caching
   var children = map[string]*types.TreeEntry{}
   updateSelf := func() {
@@ -33,7 +34,7 @@ func MonitorTree(rootPath string, input chan FileUpdate, mergeChannel chan types
   }
   for {
     select {
-      case fileUpdate := <- input:
+      case fileUpdate := <- fileUpdateChannel:
         filename := path.Base(fileUpdate.Path)
         if !fileUpdate.Exists {
           if children[filename] != nil {
@@ -159,7 +160,7 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
     select {
       case newHash := <-revisionChannel:
         commit = &types.Commit{
-          Text: "author Bob <bob@a.b> 1361949353 +0000\ncommitter Bob <bob@a.b> 1361949353 +0000\nawesome\n",
+          Text: "author Bob <bob@a.b> 1361949353 +0000\ncommitter Bob <bob@a.b> 1361949353 +0000\n\nawesome\n",
           Tree: newHash,
           Parents: []types.Hash{}, // this needs the previous *commit* hash
         }
@@ -172,8 +173,8 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
         updateHead(commitHash)
         types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash}
       case newBranchStatus := <-branchReceiveChannel:
-        if !bytes.Equal(commit.Tree, newBranchStatus.Hash) {
-          // log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
+        if !bytes.Equal(lastCommitHash, newBranchStatus.Hash) {
+          log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
           updateHead(newBranchStatus.Hash)
           mergeChannel <- newBranchStatus.Hash
         }

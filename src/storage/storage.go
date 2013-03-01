@@ -11,6 +11,8 @@ import (
 type Storage interface {
   Get(hash types.Hash) (types.Blob, error)
   Put(blob types.Blob) (types.Hash, error)
+  Deflate(in []byte) []byte
+  Inflate(in []byte) ([]byte, error)
   PutRef(name string, hash types.Hash) error
   GetRef(name string) (types.Hash, error)
 }

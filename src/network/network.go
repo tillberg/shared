@@ -16,6 +16,7 @@ import (
   "../blob"
   "../serializer"
   "../sharedpb"
+  "../storage"
   "../types"
 )
 
@@ -55,8 +56,9 @@ func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
   blob := blob.GetBlob(hash)
   data, err := serializer.Configured().Marshal(blob)
   check(err)
+  compressed := storage.Configured().Deflate(data)
   // log.Printf("bytes: %d", len(bytes))
-  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: data}}
+  dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: compressed}}
 }
 
 func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
@@ -157,7 +159,11 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
-      types.BlobReceiveChannel <- &types.File{Hash: message.Object.Hash, Bytes: message.Object.Object}
+      data, err := storage.Configured().Inflate(message.Object.Object)
+      check(err)
+      blob, err := serializer.Configured().Unmarshal(data)
+      check(err)
+      types.BlobReceiveChannel <- blob
     } else if message.Branch != nil {
       branchUpdate := types.BranchStatus{Name: *message.Branch.Name, Hash:message.Branch.Hash}
       types.BranchUpdateChannel <- branchUpdate

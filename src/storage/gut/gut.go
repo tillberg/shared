@@ -11,7 +11,7 @@ import (
   "fmt"
   "io"
   "io/ioutil"
-  // "log"
+  "log"
   "os"
   "path"
   "../../serializer"
@@ -27,7 +27,7 @@ func (s *Storage) getCachePath(hash types.Hash) string {
   return path.Join(s.RootPath, "objects", hashString[:2], hashString[2:])
 }
 
-func Deflate(in []byte) []byte {
+func (s *Storage) Deflate(in []byte) []byte {
   var b bytes.Buffer
   w := zlib.NewWriter(&b)
   w.Write(in)
@@ -35,7 +35,7 @@ func Deflate(in []byte) []byte {
   return b.Bytes()
 }
 
-func Inflate(in []byte) ([]byte, error) {
+func (s *Storage) Inflate(in []byte) ([]byte, error) {
   b := bytes.NewBuffer(in)
   r, err := zlib.NewReader(b)
   if err != nil {
@@ -61,7 +61,7 @@ func (s *Storage) Get(hash types.Hash) (blob types.Blob, err error) {
   if err != nil { return blob, err }
   compressed, err := ioutil.ReadFile(cachePath)
   if err != nil { return blob, err }
-  data, err := Inflate(compressed)
+  data, err := s.Inflate(compressed)
   if err != nil {
     return blob, errors.New(fmt.Sprintf("Error (%s) while inflating object: %s", err, cachePath))
   }
@@ -72,10 +72,10 @@ func (s *Storage) Get(hash types.Hash) (blob types.Blob, err error) {
 func (s *Storage) Put(blob types.Blob) (hash types.Hash, err error) {
   data, err := serializer.Configured().Marshal(blob)
   hash = calculateHash(data)
-  compressed := Deflate(data)
+  compressed := s.Deflate(data)
   cachePath := s.getCachePath(hash)
   os.MkdirAll(path.Dir(cachePath), 0755)
-  // log.Printf("Saving %s to cache (%d bytes)", hex.EncodeToString(hash)[:16], len(data))
+  log.Printf("Saving %s to cache (%d bytes)", hex.EncodeToString(hash)[:8], len(data))
   err = ioutil.WriteFile(cachePath, compressed, 0644)
   return hash, err
 }

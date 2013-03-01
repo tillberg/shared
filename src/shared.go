@@ -54,12 +54,12 @@ func ArbitBlobRequests() {
           subscribers[hashString] = []chan types.Hash{}
         }
         subscribers[hashString] = append(subscribers[hashString], request.ResponseChannel)
-      case file := <-types.BlobReceiveChannel:
-        hash, err := storage.Configured().Put(types.Blob{File: file})
+      case blob := <-types.BlobReceiveChannel:
+        hash, err := storage.Configured().Put(blob)
         check(err)
-        // log.Printf("Forwarding %s", GetHexString(object.Hash()))
+        log.Printf("Forwarding %s", GetHexString(hash))
         for _, subscriber := range subscribers[GetHexString(hash)] {
-          subscriber <- file.Hash
+          subscriber <- hash
         }
     }
   }
