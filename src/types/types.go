@@ -23,9 +23,8 @@ type BranchSubscription struct {
 }
 
 type BranchStatus struct {
-  Name  string
-  Hash  Hash
-  Local bool // XXX remove this in the future?  track remote refs?
+  Name   string
+  Hash   Hash
 }
 
 type BranchAncestryQuery struct {

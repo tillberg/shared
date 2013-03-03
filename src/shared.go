@@ -161,6 +161,7 @@ func main() {
 
   go ArbitBranchStatus()
   go ArbitBlobRequests()
+  go ArbitCommitHierarchy()
 
   blob.MakeBranch(*watch_target, nil, nil)
 

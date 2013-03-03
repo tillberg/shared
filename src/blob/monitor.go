@@ -171,7 +171,7 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
         check(err)
         log.Printf("New branch revision: %s", GetShortHexString(commitHash))
         updateHead(commitHash)
-        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash, Local: true}
+        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash}
       case newBranchStatus := <-branchReceiveChannel:
         log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
         updateHead(newBranchStatus.Hash)
