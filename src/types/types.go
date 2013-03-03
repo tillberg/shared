@@ -23,15 +23,23 @@ type BranchSubscription struct {
 }
 
 type BranchStatus struct {
-  Name string
-  Hash Hash
+  Name  string
+  Hash  Hash
+  Local bool // XXX remove this in the future?  track remote refs?
+}
+
+type BranchAncestryQuery struct {
+  CommitA Hash
+  CommitB Hash
+  ResponseChannel chan bool
 }
 
 var BlobRequestChannel     = make(chan BlobRequest, 100)
 var BranchSubscribeChannel = make(chan BranchSubscription, 100)
 var BranchUpdateChannel    = make(chan BranchStatus, 100)
 var BlobReceiveChannel     = make(chan Blob, 100)
-var BlobServicerChannel    = make(chan chan *sharedpb.Message, 10)
+var BlobServicerChannel    = make(chan chan *sharedpb.Message, 100)
+var DoesADescendFromBChannel = make(chan BranchAncestryQuery, 100)
 
 type Hash []byte
 

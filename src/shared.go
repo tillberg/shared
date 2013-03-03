@@ -3,7 +3,6 @@ package main
 import (
   "bytes"
   "flag"
-  "fmt"
   "os"
   "os/signal"
   "log"
@@ -33,10 +32,6 @@ var listen_port *int = flag.Int("port", 9251, "Port to listen on")
 // var branchReceiveChannel = make(chan []byte, 10)
 // var BranchSubscribeChannel = make(chan *BranchSubscription, 10)
 
-func GetHexString(bytes []byte) string {
-  return fmt.Sprintf("%#x", bytes)
-}
-
 func ArbitBlobRequests() {
   servicers := []chan *sharedpb.Message{}
   subscribers := map[string][]chan types.Hash{}
@@ -49,42 +44,20 @@ func ArbitBlobRequests() {
           servicer <- &sharedpb.Message{HashRequest: request.Hash}
         }
         hashString := blob.GetHexString(request.Hash)
-        log.Printf("Waiting for %s", blob.GetShortHexString(request.Hash))
+        // log.Printf("Waiting for %s", blob.GetShortHexString(request.Hash))
         if subscribers[hashString] == nil {
           subscribers[hashString] = []chan types.Hash{}
         }
         subscribers[hashString] = append(subscribers[hashString], request.ResponseChannel)
-      case blob := <-types.BlobReceiveChannel:
-        hash, err := storage.Configured().Put(blob)
+      case receivedBlob := <-types.BlobReceiveChannel:
+        hash, err := storage.Configured().Put(receivedBlob)
         check(err)
-        log.Printf("Forwarding %s", GetHexString(hash))
-        for _, subscriber := range subscribers[GetHexString(hash)] {
+        // log.Printf("Forwarding %s", blob.GetShortHexString(hash))
+        for _, subscriber := range subscribers[blob.GetHexString(hash)] {
           subscriber <- hash
         }
     }
   }
-}
-
-func CommitIsNew(commit types.Hash, commitOld types.Hash) bool {
-  allCommits := []types.Hash{}
-  stack := []types.Hash{commitOld}
-  for len(stack) > 0 {
-    next := stack[0]
-    if bytes.Equal(next, commit) {
-      return false
-    }
-    stack = stack[1:]
-    allCommits = append(allCommits, next)
-    commitBlob := blob.GetBlob(next)
-    if commitBlob.Commit == nil {
-      log.Printf("%#v", commitBlob)
-      log.Fatalf("Could not find commit %s", blob.GetShortHexString(next))
-    }
-    for _, parent := range commitBlob.Commit.Parents {
-      stack = append(stack, parent)
-    }
-  }
-  return true
 }
 
 func ArbitBranchStatus() {
@@ -103,12 +76,67 @@ func ArbitBranchStatus() {
         }
       case branchStatus := <-types.BranchUpdateChannel:
         branch := branchStatus.Name
-        if statuses[branch] == nil || CommitIsNew(branchStatus.Hash, statuses[branch].Hash) {
+        isNew := statuses[branch] == nil
+        if !isNew && !bytes.Equal(branchStatus.Hash, statuses[branch].Hash) {
+          query := types.BranchAncestryQuery{
+            CommitA: branchStatus.Hash,
+            CommitB: statuses[branch].Hash,
+            ResponseChannel: make(chan bool),
+          }
+          types.DoesADescendFromBChannel <- query
+          isNew = <-query.ResponseChannel
+        }
+        if isNew {
+          log.Printf("Updating %s -> %s", branch, blob.GetShortHexString(branchStatus.Hash))
           statuses[branch] = &branchStatus
           for _, subscriber := range subscribers[branch] {
             subscriber <- branchStatus
           }
+        } else {
+          log.Printf("Ignoring %s -> %s", branch, blob.GetShortHexString(branchStatus.Hash))
         }
+    }
+  }
+}
+
+func ArbitCommitHierarchy() {
+  commits := map[string]types.Commit{}
+  DoesADescendFromB := func(a types.Hash, b types.Hash) bool {
+    stack := []types.Hash{a}
+    for len(stack) > 0 {
+      next := stack[0]
+      if bytes.Equal(next, b) {
+        return true
+      }
+      stack = stack[1:]
+      str := blob.GetHexString(next)
+      commit, present := commits[str]
+      if !present {
+        commitBlob := blob.GetBlob(next)
+        if commitBlob.Commit == nil {
+          log.Printf("%#v", commitBlob)
+          log.Fatalf("Could not find commit %s", blob.GetShortHexString(next))
+        }
+        commit = *commitBlob.Commit
+        commits[str] = commit
+      }
+      for _, parent := range commit.Parents {
+        stack = append(stack, parent)
+      }
+    }
+    return false
+  }
+  for {
+    select {
+      case query := <- types.DoesADescendFromBChannel:
+        descends := DoesADescendFromB(query.CommitA, query.CommitB)
+        desc := "descends"
+        if !descends {
+          desc = "does not descend"
+        }
+        log.Printf("%s %s from %s", blob.GetShortHexString(query.CommitA),
+                   desc, blob.GetShortHexString(query.CommitB))
+        query.ResponseChannel <- descends
     }
   }
 }

@@ -11,7 +11,7 @@ import (
   "fmt"
   "io"
   "io/ioutil"
-  "log"
+  // "log"
   "os"
   "path"
   "../../serializer"
@@ -75,7 +75,7 @@ func (s *Storage) Put(blob types.Blob) (hash types.Hash, err error) {
   compressed := s.Deflate(data)
   cachePath := s.getCachePath(hash)
   os.MkdirAll(path.Dir(cachePath), 0755)
-  log.Printf("Saving %s to cache (%d bytes)", hex.EncodeToString(hash)[:8], len(data))
+  // log.Printf("Saving %s to cache (%d bytes)", hex.EncodeToString(hash)[:8], len(data))
   err = ioutil.WriteFile(cachePath, compressed, 0644)
   return hash, err
 }

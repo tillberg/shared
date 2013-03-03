@@ -149,7 +149,7 @@ func WatchTree(watchPath string, resultChannel chan FileUpdate) {
 
 func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, mergeChannel chan types.Hash) {
   branchReceiveChannel := make(chan types.BranchStatus, 10)
-  subscription := types.BranchSubscription{Name: "master", ResponseChannel: branchReceiveChannel}
+  subscription := types.BranchSubscription{Name: "origin/master", ResponseChannel: branchReceiveChannel}
   types.BranchSubscribeChannel <- subscription
   var lastCommitHash types.Hash
   updateHead := func(hash types.Hash) {
@@ -171,13 +171,11 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
         check(err)
         log.Printf("New branch revision: %s", GetShortHexString(commitHash))
         updateHead(commitHash)
-        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash}
+        types.BranchUpdateChannel <- types.BranchStatus{Name: "master", Hash: commitHash, Local: true}
       case newBranchStatus := <-branchReceiveChannel:
-        if !bytes.Equal(lastCommitHash, newBranchStatus.Hash) {
-          log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
-          updateHead(newBranchStatus.Hash)
-          mergeChannel <- newBranchStatus.Hash
-        }
+        log.Printf("New remote revision: %s", GetShortHexString(newBranchStatus.Hash))
+        updateHead(newBranchStatus.Hash)
+        mergeChannel <- newBranchStatus.Hash
     }
   }
 }

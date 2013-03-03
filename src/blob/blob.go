@@ -27,18 +27,18 @@ func check(err interface{}) {
 func GetBlob(hash types.Hash) types.Blob {
   blob, err := storage.Configured().Get(hash)
   if err == nil {
-    log.Printf("Found %s in cache", GetShortHexString(hash))
+    // log.Printf("Found %s in cache", GetShortHexString(hash))
   } else {
     responseChannel := make(chan types.Hash)
     // XXX this should be more ... targetted
     // XXX also, there's a race condition between looking on disk
     // and subscribing to object reception.  I think.  Maybe not.
     // Maybe we'll just make a duplicate network request.
-    log.Printf("Requesting %s", GetShortHexString(hash))
+    // log.Printf("Requesting %s", GetShortHexString(hash))
     types.BlobRequestChannel <- types.BlobRequest{Hash: hash, ResponseChannel: responseChannel}
     // XXX what about failure?  timeout?
     hash = <-responseChannel
-    log.Printf("Received %s", GetShortHexString(hash))
+    // log.Printf("Received %s", GetShortHexString(hash))
     blob, err = storage.Configured().Get(hash)
   }
   if err != nil {
@@ -68,7 +68,7 @@ func GetBlob(hash types.Hash) types.Blob {
 // }
 
 func GetShortHexString(bytes []byte) string {
-  return GetHexString(bytes[:8])
+  return GetHexString(bytes[:4])
 }
 
 func GetHexString(bytes []byte) string {

@@ -23,7 +23,7 @@ import (
 var apikey = ""
 
 func GetShortHexString(bytes []byte) string {
-  return GetHexString(bytes[:8])
+  return GetHexString(bytes[:4])
 }
 
 func GetHexString(bytes []byte) string {
@@ -140,7 +140,7 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   for {
     message := <- outbox
     SendSignedMessage(message, writer)
-    log.Printf("Sent %s", message.MessageString())
+    // log.Printf("Sent %s", message.MessageString())
   }
 }
 
@@ -149,7 +149,7 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   for {
     message, valid := ReceiveMessage(reader)
     if !valid { return }
-    log.Printf("Received %s", message.MessageString())
+    // log.Printf("Received %s", message.MessageString())
     if message.HashRequest != nil {
       go SendObject(message.HashRequest, outbox)
     } else if message.Object != nil {
@@ -159,7 +159,10 @@ func connIncoming(conn *net.TCPConn, outbox chan *sharedpb.Message) {
       if err != nil { log.Fatal(err) }
       types.BlobReceiveChannel <- blob
     } else if message.Branch != nil {
-      branchUpdate := types.BranchStatus{Name: *message.Branch.Name, Hash:message.Branch.Hash}
+      branchUpdate := types.BranchStatus{
+        Name: fmt.Sprintf("origin/%s", *message.Branch.Name),
+        Hash: message.Branch.Hash,
+      }
       types.BranchUpdateChannel <- branchUpdate
     } else if message.SubscribeBranch != nil {
       go SubscribeToBranch(*message.SubscribeBranch, outbox)

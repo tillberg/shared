@@ -9,7 +9,13 @@ echo " done."
 set +e
 go test src/shared_test.go -parallel 1 $*
 
-rm -rf /tmp/.git
-mv /tmp/cache1 /tmp/.git
-echo "ref: refs/heads/master" > /tmp/.git/HEAD
-mkdir -p /tmp/.git/refs/heads/
+mkdir -p /tmp/a
+mkdir -p /tmp/b
+rm -rf /tmp/a/.git
+rm -rf /tmp/b/.git
+mv /tmp/cache1 /tmp/a/.git
+mv /tmp/cache2 /tmp/b/.git
+echo "ref: refs/heads/master" > /tmp/a/.git/HEAD
+echo "ref: refs/heads/master" > /tmp/b/.git/HEAD
+mkdir -p /tmp/a/.git/refs/heads/
+mkdir -p /tmp/b/.git/refs/heads/
