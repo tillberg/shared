@@ -3,9 +3,11 @@ package blob
 
 import (
   "bytes"
+  "fmt"
   "io/ioutil"
   "log"
   "os"
+  "os/exec"
   "path"
   "time"
   "github.com/howeyc/fsnotify"
@@ -159,8 +161,13 @@ func WatchRevisions(commit *types.Commit, revisionChannel chan types.Hash, merge
   for {
     select {
       case newHash := <-revisionChannel:
+        cmd := "echo \"`git config --get user.name` <`git config --get user.email`> `date -u +%s` +0000\""
+        authorAndTime, err := exec.Command("bash", "-c", cmd).Output()
+        if err != nil {
+          log.Fatalf("Error running shell command: %s", err)
+        }
         commit = &types.Commit{
-          Text: "author Bob <bob@a.b> 1361949353 +0000\ncommitter Bob <bob@a.b> 1361949353 +0000\n\nawesome\n",
+          Text: fmt.Sprintf("author %scommitter %s\nawesome\n", authorAndTime, authorAndTime),
           Tree: newHash,
           Parents: []types.Hash{}, // this needs the previous *commit* hash
         }
