@@ -130,12 +130,12 @@ func ArbitCommitHierarchy() {
     select {
       case query := <- types.DoesADescendFromBChannel:
         descends := DoesADescendFromB(query.CommitA, query.CommitB)
-        desc := "descends"
-        if !descends {
-          desc = "does not descend"
-        }
-        log.Printf("%s %s from %s", blob.GetShortHexString(query.CommitA),
-                   desc, blob.GetShortHexString(query.CommitB))
+        // desc := "descends"
+        // if !descends {
+        //   desc = "does not descend"
+        // }
+        // log.Printf("%s %s from %s", blob.GetShortHexString(query.CommitA),
+        //            desc, blob.GetShortHexString(query.CommitB))
         query.ResponseChannel <- descends
     }
   }

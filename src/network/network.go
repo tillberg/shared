@@ -55,23 +55,24 @@ func SendObject(hash types.Hash, dest chan *sharedpb.Message) {
   dest <- &sharedpb.Message{Object: &sharedpb.Object{Hash: hash, Object: compressed}}
 }
 
-func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) {
+func SendSignedMessage(message *sharedpb.Message, writer *bufio.Writer) error {
   now := uint64(time.Now().Unix())
   message.Timestamp = &now
   // log.Printf("Going to send %s", message.MessageString())
   messageBytes, err := proto.Marshal(message)
-  if err != nil { log.Fatal(err) }
+  if err != nil { return err }
   numMessageBytes := uint64(len(messageBytes))
   preamble := &sharedpb.Preamble{Length: &numMessageBytes}
   preamble.Signature = GenerateSignature(messageBytes)
   preambleBytes, err := proto.Marshal(preamble)
-  if err != nil { log.Fatal(err) }
+  if err != nil { return err }
   WriteUvarint(writer, uint64(len(preambleBytes)))
   _, err = writer.Write(preambleBytes)
-  if err != nil { log.Fatal(err) }
+  if err != nil { return err }
   _, err = writer.Write(messageBytes)
-  if err != nil { log.Fatal(err) }
+  if err != nil { return err }
   writer.Flush()
+  return nil
 }
 
 func SendSingleMessage(message *sharedpb.Message, address string) {
@@ -88,7 +89,10 @@ func SendSingleMessage(message *sharedpb.Message, address string) {
       continue
     }
     writer := bufio.NewWriter(conn)
-    SendSignedMessage(message, writer)
+    err = SendSignedMessage(message, writer)
+    if err != nil {
+      log.Printf("Error sending single message: %s", err)
+    }
     break
   }
 }
@@ -139,7 +143,11 @@ func connOutgoing(conn *net.TCPConn, outbox chan *sharedpb.Message) {
   writer := bufio.NewWriter(conn)
   for {
     message := <- outbox
-    SendSignedMessage(message, writer)
+    err := SendSignedMessage(message, writer)
+    if err != nil {
+      log.Printf("Error sending message: %s", err)
+      break
+    }
     // log.Printf("Sent %s", message.MessageString())
   }
 }
