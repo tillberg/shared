@@ -1,21 +1,22 @@
+#!/usr/bin/env bash
+
 set -e
 echo -n "Compiling..."
-go get code.google.com/p/goprotobuf/{proto,protoc-gen-go}
-mkdir -p src/sharedpb
-protoc -I=proto/ --go_out=src/sharedpb/ proto/shared.proto
+source ./setup.sh
 echo -n "."
 go build src/shared.go
 echo " done."
 set +e
 go test src/shared_test.go -parallel 1 $*
 
-mkdir -p /tmp/a
-mkdir -p /tmp/b
-rm -rf /tmp/a/.git
-rm -rf /tmp/b/.git
-mv /tmp/cache1 /tmp/a/.git
-mv /tmp/cache2 /tmp/b/.git
-echo "ref: refs/heads/master" > /tmp/a/.git/HEAD
-echo "ref: refs/heads/master" > /tmp/b/.git/HEAD
-mkdir -p /tmp/a/.git/refs/heads/
-mkdir -p /tmp/b/.git/refs/heads/
+TEST_ROOT=/tmp # .../shared_test
+mkdir -p $TEST_ROOT/a
+mkdir -p $TEST_ROOT/b
+rm -rf $TEST_ROOT/a/.git
+rm -rf $TEST_ROOT/b/.git
+mv $TEST_ROOT/cache1 $TEST_ROOT/a/.git
+mv $TEST_ROOT/cache2 $TEST_ROOT/b/.git
+echo "ref: refs/heads/master" > $TEST_ROOT/a/.git/HEAD
+echo "ref: refs/heads/master" > $TEST_ROOT/b/.git/HEAD
+mkdir -p $TEST_ROOT/a/.git/refs/heads/
+mkdir -p $TEST_ROOT/b/.git/refs/heads/

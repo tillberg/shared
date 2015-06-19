@@ -12,7 +12,7 @@ import (
   "./storage"
   "./types"
   "github.com/howeyc/fsnotify"
-  "github.com/tillberg/goconfig/conf"
+  conf "github.com/tillberg/goconfig"
 )
 
 func check(err interface{}) {

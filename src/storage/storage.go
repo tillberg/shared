@@ -3,7 +3,7 @@ package storage
 
 import (
   "log"
-  "github.com/tillberg/goconfig/conf"
+  conf "github.com/tillberg/goconfig"
   "../types"
   "./gut"
 )
